@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
+import { buildDesignExport } from './design-evaluation.js';
+import { getSwitchboardDimensions } from './project-model.js';
 import {
-  buildDesignExport,
   evaluateBreaker,
   generateSections,
   getBusbarRule,
   getDesignConfigurationSchema,
-  getPhysicalDimensions,
   recommendBreaker,
 } from './manufacturer-rules.js';
 import { buildGaViewModel } from './ga-view-model.js';
@@ -49,7 +49,7 @@ function gaFor(project, breakers) {
     boardSections,
     busRules: (boardId, bus) => getBusbarRule(project, boardId, bus),
     evaluations: item => evaluateBreaker(item, project),
-    dimensions: getPhysicalDimensions(project),
+    dimensions: getSwitchboardDimensions(project),
   });
 }
 
@@ -87,16 +87,17 @@ for (const route of ['Top', 'Bottom']) {
   assert.equal(exported.breakerSchedule[0].evaluation.ruleId, evaluation.ruleId);
 }
 
-// Siemens route changes the Table 3/17 operational-current result while width remains Table 3/16 400 mm.
+// Siemens route changes the Table 3/17 operational-current result while width remains Tab. 3/16 nominal 400 mm.
 const siemensRoute = projectFor('Siemens');
 siemensRoute.configuration.switchboards['SWB-01'] = { busbarPositions: { 'Input Bus': 'Rear Top' } };
-for (const [route, expectedCurrent] of [['Top', 630], ['Bottom', 625]]) {
-  const item = breaker({ internalId: 'va-' + route, series: 'SENTRON 3VA', frame: '3VA1563', rating: '600A', pole: '4P', type: 'MCCB', route });
-  siemensRoute.configuration.breakers[item.internalId] = { ventilation: 'Non-ventilated' };
+// Tab. 3/17 operational current is manufacturer information; 625 A never invalidates a 630 A breaker.
+for (const [route, expectedCurrent, expectedConfidence] of [['Top', 630, 'Partially Verified'], ['Bottom', 625, 'Partially Verified']]) {
+  const item = breaker({ internalId: 'va-' + route, series: 'SENTRON 3VA', frame: '3VA1563', rating: '630A', pole: '4P', type: 'MCCB', route });
+  siemensRoute.configuration.breakers[item.internalId] = { ventilation: 'Non-ventilated', mountingDesign: 'Fixed-mounted' };
   const result = evaluateBreaker(item, siemensRoute);
   assert.equal(result.widthMm, 400);
   assert.equal(result.operationalCurrent, expectedCurrent);
-  assert.equal(result.confidence, 'Manufacturer Verified');
+  assert.equal(result.confidence, expectedConfidence);
   assert.equal(gaFor(siemensRoute, [item]).boards[0].sections[0].breakers[0].route, route);
   assert.equal(buildDesignExport(siemensRoute, [item]).breakerSchedule[0].evaluation.operationalCurrent, expectedCurrent);
 }
@@ -110,9 +111,9 @@ assert.equal(gaFor(partialProject, [partialVa]).boards[0].confidence, 'Manufactu
 
 // Representative ratings drive manufacturer-specific recommendations.
 const recommendationCases = [
-  ['ABB', '160A', 'Tmax XT', 'XT4', 'MCCB'],
+  ['ABB', '160A', 'Tmax XT', 'XT1', 'MCCB'],
   ['ABB', '400A', 'Tmax T5', 'T5 400A', 'MCCB'],
-  ['ABB', '630A', 'Tmax T6', 'T6 630A', 'MCCB'],
+  ['ABB', '630A', 'Tmax T5', 'T5 630A', 'MCCB'],
   ['ABB', '1250A', 'Emax 2', 'E1.2', 'ACB'],
   ['ABB', '3200A', 'Emax 2', 'E4.2', 'ACB'],
   ['ABB', '6300A', 'Emax 2', 'E6.2', 'ACB'],
@@ -133,14 +134,16 @@ for (const [pole, width] of [['3P', 600], ['4P', 800]]) {
   const item = breaker({ pole });
   assert.equal(evaluateBreaker(item, abb).widthMm, width);
   assert.equal(generateSections([item], abb, 'SWB-01')[0].width, width);
-  assert.equal(gaFor(abb, [item]).boards[0].totalWidthMm, width);
-  assert.equal(buildDesignExport(abb, [item]).totalWidthMm, width);
+  assert.equal(gaFor(abb, [item]).boards[0].combinedPlanningWidthMm, width);
+  assert.equal(buildDesignExport(abb, [item]).combinedPlanningWidthMm, width);
 }
+// ABB E1.2: 600 mm single-breaker width; a stored 800 mm (** four-breaker arrangement) needs confirmation.
 const e12 = breaker({ internalId: 'e12', frame: 'E1.2', rating: '1250A' });
-for (const width of [600, 800]) {
-  abb.configuration.breakers.e12 = { cubicleWidthMm: width };
-  assert.equal(evaluateBreaker(e12, abb).widthMm, width);
-  assert.equal(buildDesignExport(abb, [e12]).sectionsBySwitchboard[0].totalWidthMm, width);
+for (const [width, confidence] of [[undefined, 'Manufacturer Verified'], [600, 'Manufacturer Verified'], [800, 'Manufacturer Confirmation Required']]) {
+  abb.configuration.breakers.e12 = width ? { cubicleWidthMm: width } : {};
+  assert.equal(evaluateBreaker(e12, abb).widthMm, 600);
+  assert.equal(evaluateBreaker(e12, abb).confidence, confidence);
+  assert.equal(buildDesignExport(abb, [e12]).sectionsBySwitchboard[0].combinedPlanningWidthMm, 600);
 }
 
 // ABB and Siemens busbar positions remain electrical-role independent and propagate into GA/export.
@@ -165,11 +168,17 @@ assert.equal(evaluateBreaker(wa3p, waProject).widthMm, 800);
 
 const waHigh = breaker({ internalId: 'wa-high', series: 'SENTRON 3WA', frame: '3WA1363', rating: '6300A', pole: '4P' });
 waProject.configuration.breakers['wa-high'] = { connectionType: 'Busbar', mountingDesign: 'Withdrawable Unit' };
-assert.equal(evaluateBreaker(waHigh, waProject).ruleId, 'SIEMENS_S8_FRONT_LAYOUT_REQUIRED');
+const highMissing = evaluateBreaker(waHigh, waProject);
+assert.equal(highMissing.confidence, 'Manufacturer Confirmation Required');
+assert.ok(highMissing.missingParameters.some(item => item.startsWith('Frame height 2200 mm')));
+assert.ok(getDesignConfigurationSchema(waProject, [waHigh]).switchboards[0].controls.some(control => control.key === 'frameHeightMm' && control.required));
+waProject.configuration.switchboards['SWB-01'].frameHeightMm = 2200;
 for (const frontLayout of ['Single Front', 'Double Front']) {
   waProject.configuration.switchboards['SWB-01'].frontLayout = frontLayout;
   const result = evaluateBreaker(waHigh, waProject);
   assert.equal(result.widthMm, 1000);
+  assert.equal(result.table, 'Table 3/3 G1');
+  assert.equal(result.confidence, 'Manufacturer Verified');
   assert.equal(result.userConfiguration.frontLayout, frontLayout);
 }
 assert.ok(getDesignConfigurationSchema(waProject, [waHigh]).switchboards[0].controls.some(control => control.key === 'frontLayout'));
@@ -188,9 +197,9 @@ two.configuration.switchboards = {
 };
 const twoExport = buildDesignExport(two, [b1, b2, b3]);
 assert.equal(twoExport.sectionsBySwitchboard.length, 2);
-assert.equal(twoExport.sectionsBySwitchboard[0].totalWidthMm, 1600);
-assert.equal(twoExport.sectionsBySwitchboard[1].totalWidthMm, 800);
-assert.equal(twoExport.totalWidthMm, 2400);
+assert.equal(twoExport.sectionsBySwitchboard[0].combinedPlanningWidthMm, 1600);
+assert.equal(twoExport.sectionsBySwitchboard[1].combinedPlanningWidthMm, 800);
+assert.equal(twoExport.combinedPlanningWidthMm, 2400);
 assert.equal(gaFor(two, [b1, b2, b3]).boards.length, 2);
 
 // Main-bus rating and user-defined H/D do not silently alter manufacturer width; they remain explicit in GA/export.
@@ -198,10 +207,10 @@ const busRatingProject = projectFor('ABB', { mainBus: '5000 A' });
 busRatingProject.configuration.switchboards['SWB-01'] = { busbarPositions: { 'Input Bus': 'Top' } };
 const busRatingGa = gaFor(busRatingProject, [breaker()]);
 assert.equal(busRatingGa.boards[0].ratedMainBus, '5000 A');
-assert.equal(busRatingGa.boards[0].totalWidthMm, 800);
+assert.equal(busRatingGa.boards[0].combinedPlanningWidthMm, 800);
 const finalExport = buildDesignExport(busRatingProject, [breaker()]);
 assert.equal(finalExport.project.mainBus, '5000 A');
-assert.equal(finalExport.dimensions.currentDesignDimension.classification, 'User Defined');
+assert.equal(finalExport.dimensions.switchboardDimensions.heightStatus, 'NOT_DEFINED');
 assert.equal(finalExport.breakerSchedule[0].evaluation.ruleId, evaluateBreaker(breaker(), busRatingProject).ruleId);
 
 console.log('full parameter-to-behavior shared-chain tests passed');

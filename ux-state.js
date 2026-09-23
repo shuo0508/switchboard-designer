@@ -1,25 +1,20 @@
-export const BUS_RATINGS = ['6300 A', '5000 A', '3200 A'];
+// Application / UX state helpers. Depends on project-model only (never on the rule engine).
+import { BUS_RATINGS, SWITCHBOARD_IDS, breakerDisplayLabel, ratedMainBus, switchboardIds } from './project-model.js';
 
-export function switchboardIds(project) {
-  return project.quantity === 2 ? ['SWB-01', 'SWB-02'] : ['SWB-01'];
-}
+export { BUS_RATINGS, breakerDisplayLabel, ratedMainBus, switchboardIds };
 
 export function ensureSwitchboardState(project) {
-  project.mainBus = project.mainBus || '6300 A';
+  project.mainBus = BUS_RATINGS.includes(project.mainBus) ? project.mainBus : BUS_RATINGS[0];
   project.switchboards = project.switchboards || {};
-  ['SWB-01', 'SWB-02'].forEach(boardId => {
+  SWITCHBOARD_IDS.forEach(boardId => {
     const existing = project.switchboards[boardId] || {};
+    const override = existing.ratingMode === 'override' && BUS_RATINGS.includes(existing.ratedMainBus);
     project.switchboards[boardId] = {
-      ratedMainBus: existing.ratedMainBus || project.mainBus,
-      ratingMode: existing.ratingMode === 'override' ? 'override' : 'inherited',
+      ratedMainBus: override ? existing.ratedMainBus : project.mainBus,
+      ratingMode: override ? 'override' : 'inherited',
     };
   });
   return project;
-}
-
-export function ratedMainBus(project, boardId) {
-  ensureSwitchboardState(project);
-  return project.switchboards[boardId]?.ratedMainBus || project.mainBus;
 }
 
 export function updateDefaultMainBus(project, value) {
@@ -40,12 +35,15 @@ export function revertRatedMainBus(project, boardId) {
   project.switchboards[boardId] = { ratedMainBus: project.mainBus, ratingMode: 'inherited' };
 }
 
-export function breakerDisplayLabel(breaker) {
-  return `${breaker.switchboardId || 'SWB-01'} / ${breaker.id}`;
-}
-
 export function cableRouteLabel(route) {
   return route === 'Top' ? 'Top Entry / Exit' : 'Bottom Entry / Exit';
+}
+
+// Explicit user assignment. The preferred board is kept even while the project is in 1-switchboard mode.
+export function assignBreakerToSwitchboard(breaker, boardId) {
+  breaker.switchboardId = boardId;
+  breaker.assignmentMode = 'explicit';
+  breaker.preferredSwitchboardId = boardId;
 }
 
 export function proposedSwitchboardAssignment(breakers, quantity) {
@@ -55,7 +53,7 @@ export function proposedSwitchboardAssignment(breakers, quantity) {
     proposed: quantity === 1
       ? 'SWB-01'
       : breaker.assignmentMode === 'explicit'
-        ? breaker.switchboardId || 'SWB-01'
+        ? breaker.preferredSwitchboardId || breaker.switchboardId || 'SWB-01'
         : breaker.bus === 'UPS Output Bus' ? 'SWB-02' : 'SWB-01',
   }));
 }
@@ -67,25 +65,4 @@ export function applySwitchboardAssignment(project, breakers, quantity, proposal
     breaker.switchboardId = targetById.get(breaker.internalId) || 'SWB-01';
   });
   ensureSwitchboardState(project);
-}
-
-export function designStatus(project, breakers, evaluations, validation, completeness) {
-  const results = breakers.map(evaluations);
-  const summary = {
-    manufacturerMatched: results.filter(result => result.confidence === 'Manufacturer Verified').length,
-    confirmationRequired: results.filter(result => result.confidence === 'Manufacturer Confirmation Required').length,
-    engineeringEstimate: results.filter(result => result.classification === 'Engineering Estimate').length,
-    invalid: results.filter(result => result.confidence === 'Invalid Manufacturer Configuration').length + validation.issues.length,
-  };
-  const unresolvedConditions = completeness.items
-    .filter(item => item.status === 'Missing')
-    .map(item => ({ scope: item.scope, condition: item.label, sourceRule: item.sourceRule }));
-  const invalidConditions = validation.issues.map(issue => ({
-    scope: issue.scope,
-    field: issue.field,
-    message: issue.message,
-    manufacturerRule: issue.manufacturerRule || null,
-  }));
-  const status = summary.invalid ? 'INVALID' : unresolvedConditions.length || summary.confirmationRequired ? 'INCOMPLETE' : 'VALID / MATCHED';
-  return { designStatus: status, unresolvedConditions, invalidConditions, confidenceSummary: summary };
 }
