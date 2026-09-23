@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { buildDesignExport, evaluateBreaker, getBusbarRule } from './manufacturer-rules.js';
+import { getBusbarRule } from './manufacturer-rules.js';
+import { buildDesignExport, designStatus } from './design-evaluation.js';
 import { FUNCTIONS, flowForBreaker, renumberBreakersBySwitchboard } from './topology.js';
 import {
   applySwitchboardAssignment,
   breakerDisplayLabel,
   cableRouteLabel,
-  designStatus,
   ensureSwitchboardState,
   proposedSwitchboardAssignment,
   ratedMainBus,
@@ -50,11 +50,10 @@ assert.equal(breakerDisplayLabel(breakers[1]), 'SWB-02 / CB-01');
 const busRule = getBusbarRule(project, 'SWB-01', 'Input Bus');
 assert.equal(busRule.confidence, 'Manufacturer-Supported · User Selected');
 
-const validation = { valid: true, issues: [] };
-const completeness = { items: [{ scope: 'SWB-02', label: 'Physical Position', status: 'Missing', sourceRule: 'TEST' }] };
-const status = designStatus(project, breakers, item => evaluateBreaker(item, project), validation, completeness);
+// SWB-02 UPS Output Bus has no physical position selected and E1.2 has no selected width.
+const status = designStatus(project, breakers);
 assert.equal(status.designStatus, 'INCOMPLETE');
-assert.equal(status.unresolvedConditions.length, 1);
+assert.ok(status.unresolvedConditions.some(item => item.scope === 'SWB-02'));
 
 const exported = buildDesignExport(project, breakers);
 assert.equal(exported.switchboards[0].ratedMainBusCurrent, '5000 A');
@@ -63,6 +62,7 @@ assert.equal(exported.breakerSchedule[1].displayLabel, 'SWB-02 / CB-01');
 assert.ok('designStatus' in exported);
 assert.ok(Array.isArray(exported.unresolvedConditions));
 assert.ok('confidenceSummary' in exported);
-assert.equal(exported.combinedPlanningWidthMm, exported.totalWidthMm);
+assert.equal('totalWidthMm' in exported, false);
+assert.equal(typeof exported.containsProvisionalWidth, 'boolean');
 
 console.log('UX remediation state, terminology, identity and export tests passed');

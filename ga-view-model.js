@@ -1,5 +1,5 @@
 import { flowForBreaker, functionDefinition } from './topology.js';
-import { breakerDisplayLabel, ratedMainBus } from './ux-state.js';
+import { breakerDisplayLabel, ratedMainBus } from './project-model.js';
 
 function boardConfidence(buses, sections) {
   const values = [...buses.map(bus => bus.confidence), ...sections.map(section => section.confidence)];
@@ -58,31 +58,44 @@ export function buildGaViewModel({ project, breakers, boardSections, busRules, e
         busId: buses.find(bus => bus.name === section.bus)?.id || 'BUS-?',
         busName: section.bus,
         widthMm: section.width,
+        widthStatus: section.widthStatus,
+        widthLabel: section.widthLabel,
         confidence: section.confidence,
         sourceRule: section.packingRuleId,
-        physicalArrangementConfidence: section.packingRuleId === 'NO_AUTOMATIC_MCCB_PACKING' && sectionBreakers.some(item => item.type === 'MCCB') ? 'SCHEMATIC DEVICE POSITION' : section.confidence,
+        packingStatus: section.packingStatus,
+        physicalArrangementConfidence: section.packingStatus === 'UNRESOLVED' ? 'SCHEMATIC DEVICE POSITION' : section.confidence,
         missingParameters: section.packingMissingParameters || [],
         breakers: sectionBreakers,
         rawSection: section,
       };
     });
+    const provisional = modelSections.filter(section => section.widthStatus !== 'VERIFIED');
     return {
       id: boardId,
       manufacturer: project.manufacturer,
       system: project.system,
       ratedMainBus: ratedMainBus(project, boardId),
-      totalWidthMm: modelSections.reduce((sum, section) => sum + section.widthMm, 0),
+      combinedPlanningWidthMm: modelSections.reduce((sum, section) => sum + section.widthMm, 0),
+      provisionalPlanningWidthMm: provisional.reduce((sum, section) => sum + section.widthMm, 0),
+      containsProvisionalWidth: provisional.length > 0,
       dimensions: {
         heightMm: dimensions.heightMm,
         depthMm: dimensions.depthMm,
-        confidence: dimensions.confidence || dimensions.classification,
+        heightStatus: dimensions.heightStatus,
+        depthStatus: dimensions.depthStatus,
+        label: dimensions.label,
       },
       buses,
       sections: modelSections,
       confidence: boardConfidence(buses, modelSections),
     };
   });
-  return { mode: 'SCHEMATIC', boards, totalWidthMm: boards.reduce((sum, board) => sum + board.totalWidthMm, 0) };
+  return {
+    mode: 'SCHEMATIC',
+    boards,
+    combinedPlanningWidthMm: boards.reduce((sum, board) => sum + board.combinedPlanningWidthMm, 0),
+    containsProvisionalWidth: boards.some(board => board.containsProvisionalWidth),
+  };
 }
 
 export const __test = { flowFor: flowForBreaker };

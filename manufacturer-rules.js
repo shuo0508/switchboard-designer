@@ -1,22 +1,19 @@
-import { breakerDisplayLabel, designStatus as summarizeDesignStatus, ratedMainBus, switchboardIds } from './ux-state.js';
+// Manufacturer data and rule engine. Depends only on manufacturer-independent project helpers.
+import { breakerDisplayLabel, ratingAmps as parseRatingAmps, switchboardIds } from './project-model.js';
+
+// Document-level identity only. Page / table references are resolved per rule through RULE_METADATA.
 export const RULE_SOURCES = {
   abbMnsR: {
     manufacturer: 'ABB',
     system: 'MNS R',
     document: 'ABB MNS R Low Voltage Switchgear System Guide',
     revision: '1TTB900011D0203',
-    pdfPage: '22-24',
-    printedPage: '22-24',
-    chapter: 'Standardization / Power Center Breakers / MCCB',
   },
   siemensS8: {
     manufacturer: 'Siemens',
     system: 'SIVACON S8',
     document: 'TIP Planning manual SIVACON S8',
     revision: '2025-02 EN',
-    pdfPage: '25-28, 37-38',
-    printedPage: '25-28, 33-34',
-    chapter: 'Circuit-Breaker Design / Tables 3/2-3/4 / 3VA design',
   },
 };
 
@@ -84,9 +81,104 @@ const SIEMENS_3VA_OPERATIONAL_CURRENT = {
 };
 
 const CONFIRMATION = 'Manufacturer Confirmation Required';
+export const NOT_SPECIFIED = 'Not specified in source metadata';
+
+// ---------------------------------------------------------------------------
+// Rule source metadata. Every active rule ID must resolve through this catalog,
+// either directly or through a parent rule. Missing fields are never invented.
+// ---------------------------------------------------------------------------
+const CATALOG_USAGE = {
+  ABB_MNSR_DIMENSIONS_AVAILABLE: 'Displayed only (not matched to a configuration)',
+  ABB_MNSR_MCCB_STANDARDIZATION: 'Evaluated by shared rule engine',
+  ABB_MNSR_T6_T7_FOUR_BREAKER_800_AVAILABLE: 'Catalogued only (not automatically matched)',
+  ABB_MNSR_BUSBAR_POSITIONS_AVAILABLE: 'Evaluated by shared rule engine',
+  ABB_MNSR_PC_BUSBAR_MODULE_CONDITIONS: 'Catalogued only (conditions not yet evaluated)',
+  ABB_MNSR_MCCB_COMPARTMENT_REQUIREMENTS: 'Catalogued only (packing remains unresolved)',
+  SIEMENS_S8_BUSBAR_CONFIGURATION_INPUTS: 'Evaluated by shared rule engine',
+  SIEMENS_S8_3WA_LAYOUT_TABLES_PREREQUISITES: 'Evaluated by shared rule engine',
+  SIEMENS_S8_3VA_SINGLE_MCCB_400_AVAILABLE: 'Evaluated by shared rule engine',
+};
+
+const ADDITIONAL_RULE_METADATA = [
+  // Existing engine rule: previously referenced as "ABB MNS R p.22" in result text and audit only.
+  { ruleId: 'ABB_MNSR_ACB_STANDARDIZATION', manufacturer: 'ABB', system: 'MNS R', category: 'ACB cubicle standardization', sourceDocument: RULE_SOURCES.abbMnsR.document, revision: RULE_SOURCES.abbMnsR.revision, pdfPage: '22', printedPage: '22', section: 'Standardization', table: 'Power Center Breakers', figure: null, confidence: 'Manufacturer Verified', result: 'Emax 2 E1.2 / E2.2 / E4.2 / E6.2 cubicle width and module', usage: 'Evaluated by shared rule engine' },
+  { ruleId: 'SIEMENS_S8_3WA_TABLE_3_2', parentRuleId: 'SIEMENS_S8_3WA_LAYOUT_TABLES_PREREQUISITES', table: 'Table 3/2', pdfPage: '29', printedPage: '25', usage: 'Evaluated by shared rule engine' },
+  { ruleId: 'SIEMENS_S8_3WA_TABLE_3_3', parentRuleId: 'SIEMENS_S8_3WA_LAYOUT_TABLES_PREREQUISITES', table: 'Table 3/3', pdfPage: '30', printedPage: '26', usage: 'Evaluated by shared rule engine' },
+  { ruleId: 'SIEMENS_S8_3WA_TABLE_3_4', parentRuleId: 'SIEMENS_S8_3WA_LAYOUT_TABLES_PREREQUISITES', table: 'Table 3/4', pdfPage: '31', printedPage: '27', usage: 'Evaluated by shared rule engine' },
+  { ruleId: 'SIEMENS_S8_3WA_FOOTNOTE', parentRuleId: 'SIEMENS_S8_3WA_LAYOUT_TABLES_PREREQUISITES', table: 'Tables 3/2-3/4 footnotes', usage: 'Evaluated by shared rule engine' },
+  { ruleId: 'SIEMENS_S8_TABLE_3_3_FOOTNOTE', parentRuleId: 'SIEMENS_S8_3WA_LAYOUT_TABLES_PREREQUISITES', table: 'Table 3/3 footnotes', usage: 'Evaluated by shared rule engine' },
+  { ruleId: 'SIEMENS_S8_TABLE_3_17', parentRuleId: 'SIEMENS_S8_3VA_SINGLE_MCCB_400_AVAILABLE', table: 'Table 3/17', usage: 'Evaluated by shared rule engine' },
+  // Application (non-manufacturer) rules. These are explicitly not manufacturer sourced.
+  { ruleId: 'NO_VERIFIED_RULE', sourceType: 'APPLICATION', category: 'No manufacturer rule matched', result: 'Provisional planning width only', confidence: CONFIRMATION, usage: 'Shared rule engine fallback' },
+  { ruleId: 'NO_AUTOMATIC_MCCB_PACKING', sourceType: 'APPLICATION', category: 'MCCB section packing', result: 'No automatic multi-MCCB packing; section arrangement unresolved', confidence: CONFIRMATION, usage: 'Shared section generator' },
+  { ruleId: 'SINGLE_ACB_CUBICLE', sourceType: 'APPLICATION', category: 'ACB section arrangement', result: 'One ACB per generated section; width taken from the matched device cubicle rule', confidence: 'Application convention', usage: 'Shared section generator' },
+  { ruleId: 'BUSBAR_POSITION_CONFIRMATION_REQUIRED', sourceType: 'APPLICATION', category: 'Physical busbar position', result: 'Physical position not selected', confidence: CONFIRMATION, usage: 'Shared rule engine' },
+  { ruleId: 'INVALID_BUSBAR_CONFIGURATION', sourceType: 'APPLICATION', category: 'Physical busbar position', result: 'Selected position not in manufacturer option list', confidence: 'Invalid Manufacturer Configuration', usage: 'Shared rule engine' },
+  { ruleId: 'DERIVED_INPUT', sourceType: 'APPLICATION', category: 'Derived input', result: 'Derived from Function / Route', confidence: 'Engineering Derived', usage: 'Configuration completeness' },
+  { ruleId: 'SIEMENS_ONLY', sourceType: 'APPLICATION', category: 'Applicability', result: 'Not applicable for this manufacturer', confidence: 'Not Applicable', usage: 'Configuration completeness' },
+  { ruleId: 'DIMENSIONS_CONFIGURATION_REQUIRED', sourceType: 'APPLICATION', category: 'Dimensions', result: 'No manufacturer dimension data encoded for this system', confidence: CONFIRMATION, usage: 'Shared rule engine' },
+  { ruleId: 'ELECTRICAL_INCOMER_EXCEEDS_BUS_RATING', sourceType: 'APPLICATION', category: 'Electrical design consistency', result: 'Incomer rated current must not exceed the Rated Main Bus Current', confidence: 'Electrical Design Conflict', usage: 'Electrical consistency validation' },
+];
+
+// Dynamic rule IDs resolve to a parent rule that carries source metadata.
+const DYNAMIC_RULE_PARENTS = [
+  [/^ABB_MNSR_ACB_/, 'ABB_MNSR_ACB_STANDARDIZATION'],
+  [/^ABB_MNSR_E1_2_/, 'ABB_MNSR_ACB_STANDARDIZATION'],
+  [/^ABB_MNSR_MCCB_/, 'ABB_MNSR_MCCB_STANDARDIZATION'],
+  [/^ABB_MNSR_BUSBAR_POSITION_SELECTED$/, 'ABB_MNSR_BUSBAR_POSITIONS_AVAILABLE'],
+  [/^SIEMENS_S8_BUSBAR_POSITION_SELECTED$/, 'SIEMENS_S8_BUSBAR_CONFIGURATION_INPUTS'],
+  [/^SIEMENS_S8_3VA_/, 'SIEMENS_S8_3VA_SINGLE_MCCB_400_AVAILABLE'],
+  [/^SIEMENS_S8_(3WA_|BUSBAR_POSITION_REQUIRED|CONNECTION_|FRONT_LAYOUT_|MOUNTING_|CUBICLE_WIDTH_|TABLE_3_3_CONFLICT|TABLE_3_4_TYPE_CONFLICT)/, 'SIEMENS_S8_3WA_LAYOUT_TABLES_PREREQUISITES'],
+];
+
+const RULE_METADATA = new Map();
+MANUFACTURER_RULE_CATALOG.forEach(rule => RULE_METADATA.set(rule.ruleId, { ...rule, sourceType: 'MANUFACTURER', usage: CATALOG_USAGE[rule.ruleId] || 'Catalogued only' }));
+ADDITIONAL_RULE_METADATA.forEach(rule => RULE_METADATA.set(rule.ruleId, { sourceType: rule.parentRuleId ? 'MANUFACTURER' : rule.sourceType || 'MANUFACTURER', ...rule }));
+
+function documentFor(manufacturer) {
+  return manufacturer === 'Siemens' ? RULE_SOURCES.siemensS8 : manufacturer === 'ABB' ? RULE_SOURCES.abbMnsR : null;
+}
+
+export function resolveRuleSource(ruleId) {
+  const value = item => item === undefined || item === null || item === '' ? NOT_SPECIFIED : item;
+  let entry = RULE_METADATA.get(ruleId);
+  let parentRuleId = entry?.parentRuleId || null;
+  if (!entry) {
+    const match = DYNAMIC_RULE_PARENTS.find(([pattern]) => pattern.test(ruleId || ''));
+    if (match) { parentRuleId = match[1]; entry = { ruleId, parentRuleId }; }
+  }
+  if (!entry) {
+    return { ruleId: value(ruleId), resolvedRuleId: null, parentRuleId: null, sourceType: 'UNRESOLVED', manufacturer: NOT_SPECIFIED, system: NOT_SPECIFIED, document: NOT_SPECIFIED, revision: NOT_SPECIFIED, pdfPage: NOT_SPECIFIED, printedPage: NOT_SPECIFIED, section: NOT_SPECIFIED, table: NOT_SPECIFIED, figure: NOT_SPECIFIED };
+  }
+  const parent = parentRuleId ? RULE_METADATA.get(parentRuleId) || {} : {};
+  const merged = { ...parent, ...Object.fromEntries(Object.entries(entry).filter(([, item]) => item !== undefined)) };
+  if (merged.sourceType === 'APPLICATION') {
+    return { ruleId, resolvedRuleId: ruleId, parentRuleId: null, sourceType: 'APPLICATION', manufacturer: 'Application rule (not manufacturer sourced)', system: NOT_SPECIFIED, document: NOT_SPECIFIED, revision: NOT_SPECIFIED, pdfPage: NOT_SPECIFIED, printedPage: NOT_SPECIFIED, section: value(merged.category), table: NOT_SPECIFIED, figure: NOT_SPECIFIED };
+  }
+  const doc = documentFor(merged.manufacturer) || {};
+  return {
+    ruleId,
+    resolvedRuleId: RULE_METADATA.has(ruleId) ? ruleId : parentRuleId,
+    parentRuleId,
+    sourceType: 'MANUFACTURER',
+    manufacturer: value(merged.manufacturer),
+    system: value(merged.system),
+    document: value(merged.sourceDocument || doc.document),
+    revision: value(merged.revision || doc.revision),
+    pdfPage: value(merged.pdfPage),
+    printedPage: value(merged.printedPage),
+    section: value(merged.section),
+    table: value(merged.table),
+    figure: value(merged.figure),
+  };
+}
+
+export function listRuleMetadataIds() {
+  return [...RULE_METADATA.keys()];
+}
 
 function sourceFor(manufacturer) {
-  return manufacturer === 'Siemens' ? RULE_SOURCES.siemensS8 : RULE_SOURCES.abbMnsR;
+  return documentFor(manufacturer) || {};
 }
 
 function boardConfiguration(project, boardId) {
@@ -154,7 +246,45 @@ function verified(widthMm, ruleId, source, matchedRule, extras = {}) {
   };
 }
 export function ratingAmps(rating) {
-  return Number.parseInt(String(rating || '').replace(/[^0-9]/g, ''), 10) || 0;
+  return parseRatingAmps(rating);
+}
+
+// ---------------------------------------------------------------------------
+// Product catalog for UI option lists. Frames are derived from the encoded tables
+// so the UI never offers a frame that the engine does not know.
+// ---------------------------------------------------------------------------
+export const RATING_OPTIONS = ['16A', '20A', '25A', '32A', '40A', '50A', '63A', '80A', '100A', '125A', '160A', '200A', '250A', '315A', '400A', '500A', '630A', '800A', '1000A', '1250A', '1600A', '2000A', '2500A', '3200A', '4000A', '5000A', '6300A'];
+export const POLE_OPTIONS = ['3P', '4P'];
+
+export function getProductCatalog(manufacturer) {
+  const unique = list => [...new Set(list)];
+  if (manufacturer === 'ABB') {
+    const mccbFrames = unique(ABB_MCCB.map(row => row[0]));
+    return {
+      series: ['Emax 2', 'Tmax XT', 'Tmax T5', 'Tmax T6'],
+      framesBySeries: {
+        'Emax 2': ['E1.2', ...unique(ABB_ACB.map(row => row[0]))],
+        'Tmax XT': mccbFrames.filter(frame => frame.startsWith('XT')),
+        'Tmax T5': mccbFrames.filter(frame => frame.startsWith('T5')),
+        'Tmax T6': mccbFrames.filter(frame => frame.startsWith('T6')),
+      },
+      ratings: [...RATING_OPTIONS],
+      poles: [...POLE_OPTIONS],
+    };
+  }
+  return {
+    series: ['SENTRON 3WA', 'SENTRON 3VA'],
+    framesBySeries: {
+      'SENTRON 3WA': Object.keys(SIEMENS_3WA_WIDTHS),
+      'SENTRON 3VA': Object.keys(SIEMENS_3VA_OPERATIONAL_CURRENT),
+    },
+    ratings: [...RATING_OPTIONS],
+    poles: [...POLE_OPTIONS],
+  };
+}
+
+export function framesForSeries(manufacturer, series) {
+  return [...(getProductCatalog(manufacturer).framesBySeries[series] || [])];
 }
 
 export function deriveBreakerType(series) {
@@ -274,6 +404,7 @@ export function evaluateBreaker(breaker, project) {
   const result = evaluateBreakerCore(breaker, project);
   return {
     ...result,
+    source: resolveRuleSource(result.ruleId),
     derivedInputs: {
       circuitRole: breaker.direction,
       entryDirection: breaker.route,
@@ -299,20 +430,43 @@ function generic3waWidths(breaker) {
   const row = SIEMENS_3WA_WIDTHS[breaker.frame];
   return row ? [...new Set([...(row.cable[breaker.pole] || []), ...(row.busbar[breaker.pole] || [])])].sort((a, b) => a - b) : [];
 }
+export const SECTION_WIDTH_STATUS = { VERIFIED: 'VERIFIED', PROVISIONAL: 'PROVISIONAL' };
+export const PACKING_STATUS = { UNRESOLVED: 'UNRESOLVED', NOT_APPLICABLE: 'NOT_APPLICABLE' };
+
+// A section is generated per device. Device data (cubicle width / module) and the
+// section arrangement are classified separately: a verified MCCB device rule does NOT
+// make "one MCCB = one complete cubicle" a manufacturer-verified arrangement.
 function makeSection(items, boardId, id, project) {
   const first = items[0];
-  const base = evaluateBreaker(first, project);
+  const device = evaluateBreaker(first, project);
+  const isMccb = first.type === 'MCCB';
+  const packingMissingParameters = mccbPackingRequirements(first, project);
+  const deviceInvalid = device.status === 'INVALID_MANUFACTURER_CONFIGURATION';
+  const deviceVerified = device.status === 'MANUFACTURER_VERIFIED';
+  const widthStatus = !isMccb && deviceVerified ? SECTION_WIDTH_STATUS.VERIFIED : SECTION_WIDTH_STATUS.PROVISIONAL;
+  const confidence = deviceInvalid ? 'Invalid Manufacturer Configuration' : isMccb ? CONFIRMATION : device.confidence;
+  const packingRuleId = isMccb ? 'NO_AUTOMATIC_MCCB_PACKING' : 'SINGLE_ACB_CUBICLE';
   return {
     id,
     boardId,
     bus: first.bus,
     items,
-    width: items.reduce((total, item) => total + evaluateBreaker(item, project).widthMm, 0),
-    arrangement: 'Individual manufacturer cubicle recommendation; no automatic multi-MCCB physical packing',
-    confidence: base.confidence,
-    packingRuleId: 'NO_AUTOMATIC_MCCB_PACKING',
-    packingSource: base.source,
-    packingMissingParameters: mccbPackingRequirements(first, project),
+    width: device.widthMm,
+    widthStatus,
+    widthLabel: widthStatus === SECTION_WIDTH_STATUS.VERIFIED ? 'Verified Section Width' : 'Provisional Planning Width · Engineering Estimate',
+    classification: widthStatus === SECTION_WIDTH_STATUS.VERIFIED ? 'Manufacturer Verified' : 'Engineering Estimate',
+    confidence,
+    arrangement: isMccb
+      ? 'Single-MCCB planning section. Device data only; official MCCB packing / compartment arrangement unresolved.'
+      : 'Single-ACB section using the matched device cubicle rule.',
+    deviceRuleId: device.ruleId,
+    deviceConfidence: device.confidence,
+    deviceWidthMm: device.widthMm,
+    deviceModule: device.module || null,
+    packingStatus: isMccb ? PACKING_STATUS.UNRESOLVED : PACKING_STATUS.NOT_APPLICABLE,
+    packingRuleId,
+    packingSource: resolveRuleSource(packingRuleId),
+    packingMissingParameters,
   };
 }
 export function mccbPackingRequirements(breaker, project) {
@@ -343,7 +497,7 @@ export function getDesignConfigurationSchema(project, breakers) {
       options: getValidBusbarPositions(project),
       value: boardConfiguration(project, boardId).busbarPositions?.[bus] || '',
       reason: project.manufacturer === 'ABB' ? 'ABB MNS R p.14 supports Top, Center and Bottom.' : 'SIVACON S8 Tables 3/2-3/4 depend on Top, Rear Top or Rear Bottom.',
-      sourceRule: project.manufacturer === 'ABB' ? 'ABB_MNSR_BUSBAR_POSITIONS_AVAILABLE' : 'SIEMENS_S8_3WA_TOP_REAR_TABLES',
+      sourceRule: project.manufacturer === 'ABB' ? 'ABB_MNSR_BUSBAR_POSITIONS_AVAILABLE' : 'SIEMENS_S8_3WA_LAYOUT_TABLES_PREREQUISITES',
     }));
     if (project.manufacturer === 'Siemens' && boardBreakers.some(breaker => ['3WA1350', '3WA1363'].includes(breaker.frame))) {
       controls.push({ key: 'frontLayout', label: 'Single / Double Front', options: [...CONFIG_OPTIONS.Siemens.frontLayouts], value: boardConfiguration(project, boardId).frontLayout || '', reason: 'Table 3/3 footnotes and Table 2/6 make front layout relevant to high-current configurations.', sourceRule: 'SIEMENS_S8_TABLE_3_3_FOOTNOTE' });
@@ -355,9 +509,9 @@ export function getDesignConfigurationSchema(project, breakers) {
     const controls = [];
     if (project.manufacturer === 'ABB' && breaker.series === 'Emax 2' && breaker.frame === 'E1.2') controls.push({ key: 'cubicleWidthMm', label: 'E1.2 Cubicle Width', options: CONFIG_OPTIONS.ABB.e12CubicleWidths, value: config.cubicleWidthMm || '', reason: 'ABB MNS R p.22 lists 600 and 800 mm.', sourceRule: 'ABB_MNSR_ACB_STANDARDIZATION' });
     if (project.manufacturer === 'Siemens' && breaker.series === 'SENTRON 3WA') {
-      controls.push({ key: 'connectionType', label: 'Connection Type', options: getValidConnectionTypes(project, breaker), value: config.connectionType || '', reason: 'Tables 3/2-3/4 separate Cable and Busbar connection.', sourceRule: 'SIEMENS_S8_3WA_TOP_REAR_TABLES' });
+      controls.push({ key: 'connectionType', label: 'Connection Type', options: getValidConnectionTypes(project, breaker), value: config.connectionType || '', reason: 'Tables 3/2-3/4 separate Cable and Busbar connection.', sourceRule: 'SIEMENS_S8_3WA_LAYOUT_TABLES_PREREQUISITES' });
       const widths = generic3waWidths(breaker);
-      if (widths.length > 1) controls.push({ key: 'cubicleWidthMm', label: 'Manufacturer Cubicle Width', options: widths, value: config.cubicleWidthMm || '', reason: 'The 3WA table row has more than one supported width.', sourceRule: 'SIEMENS_S8_3WA_TOP_REAR_TABLES' });
+      if (widths.length > 1) controls.push({ key: 'cubicleWidthMm', label: 'Manufacturer Cubicle Width', options: widths, value: config.cubicleWidthMm || '', reason: 'The 3WA table row has more than one supported width.', sourceRule: 'SIEMENS_S8_3WA_LAYOUT_TABLES_PREREQUISITES' });
       const mounting = getValidMountingDesigns(project, breaker);
       if (mounting.length) controls.push({ key: 'mountingDesign', label: '3WA Mounting Design', options: mounting, value: config.mountingDesign || '', reason: 'The table footnote requires Withdrawable Unit for this type.', sourceRule: 'SIEMENS_S8_3WA_FOOTNOTE' });
     }
@@ -367,26 +521,43 @@ export function getDesignConfigurationSchema(project, breakers) {
   return { switchboards, breakers: breakerControls };
 }
 
+function issue(issueId, fields) {
+  return { issueId, classification: 'Invalid Manufacturer Configuration', ...fields };
+}
+
+// Manufacturer configuration validation. Each engineering issue has a stable issueId and is reported once.
 export function validateDesignConfiguration(project, breakers) {
-  const issues = [];
+  const issues = new Map();
+  const add = item => { if (!issues.has(item.issueId)) issues.set(item.issueId, item); };
   const validPositions = getValidBusbarPositions(project);
-  const boardIds = project.quantity === 2 ? ['SWB-01', 'SWB-02'] : ['SWB-01'];
+  const boardIds = switchboardIds(project);
+  const positionRule = project.manufacturer === 'ABB' ? 'ABB_MNSR_BUSBAR_POSITIONS_AVAILABLE' : 'SIEMENS_S8_3WA_LAYOUT_TABLES_PREREQUISITES';
   boardIds.forEach(boardId => {
     const buses = [...new Set(breakers.filter(b => b.switchboardId === boardId).map(b => b.bus))];
     const positions = buses.map(bus => boardConfiguration(project, boardId).busbarPositions?.[bus]).filter(Boolean);
-    positions.filter(position => !validPositions.includes(position)).forEach(position => issues.push({ scope: boardId, field: 'Physical Busbar Position', message: position + ' is not supported by ' + project.manufacturer + '.', currentValue: position, manufacturerRule: project.manufacturer === 'ABB' ? 'ABB_MNSR_BUSBAR_POSITIONS_AVAILABLE' : 'SIEMENS_S8_3WA_TOP_REAR_TABLES', validAlternatives: validPositions.filter(item => item !== position) }));
-    if (new Set(positions).size !== positions.length) issues.push({ scope: boardId, field: 'Physical Busbar Position', message: 'Two electrical buses cannot match the same physical position.', currentValue: positions.join(' + '), manufacturerRule: project.manufacturer === 'ABB' ? 'ABB_MNSR_BUSBAR_POSITIONS_AVAILABLE' : 'SIEMENS_S8_3WA_TOP_REAR_TABLES', validAlternatives: validPositions });
+    positions.filter(position => !validPositions.includes(position)).forEach(position => add(issue(`MFR:${boardId}:BUSBAR_POSITION_UNSUPPORTED:${position}`, { scope: boardId, field: 'Physical Busbar Position', message: position + ' is not supported by ' + project.manufacturer + '.', currentValue: position, manufacturerRule: positionRule, validAlternatives: validPositions.filter(item => item !== position) })));
+    if (new Set(positions).size !== positions.length) add(issue(`MFR:${boardId}:BUSBAR_POSITION_DUPLICATE`, { scope: boardId, field: 'Physical Busbar Position', message: 'Two electrical buses cannot match the same physical position.', currentValue: positions.join(' + '), manufacturerRule: positionRule, validAlternatives: validPositions }));
     if (project.manufacturer === 'Siemens' && positions.length > 1) {
       const pair = new Set(positions);
-      if (!(pair.has('Rear Top') && pair.has('Rear Bottom') && pair.size === 2)) issues.push({ scope: boardId, field: 'Physical Busbar Position', message: 'Encoded Siemens two-bus configuration is Table 3/4: Rear Top + Rear Bottom.', currentValue: positions.join(' + '), manufacturerRule: 'SIEMENS_S8_3WA_TOP_REAR_TABLES', validAlternatives: ['Rear Top + Rear Bottom'] });
+      if (!(pair.has('Rear Top') && pair.has('Rear Bottom') && pair.size === 2)) add(issue(`MFR:${boardId}:SIEMENS_TWO_BUS_PAIR`, { scope: boardId, field: 'Physical Busbar Position', message: 'Encoded Siemens two-bus configuration is Table 3/4: Rear Top + Rear Bottom.', currentValue: positions.join(' + '), manufacturerRule: positionRule, validAlternatives: ['Rear Top + Rear Bottom'] }));
     }
   });
   breakers.forEach(breaker => {
     const result = evaluateBreaker(breaker, project);
-    if (result.status === 'INVALID_MANUFACTURER_CONFIGURATION') issues.push({ scope: breakerDisplayLabel(breaker), internalId: breaker.internalId, field: 'Breaker Configuration', message: result.matchedRule, manufacturerRule: result.ruleId, validAlternatives: result.availableWidths || [] });
-    if (result.operationalCurrentStatus === 'Invalid Manufacturer Configuration') issues.push({ scope: breakerDisplayLabel(breaker), internalId: breaker.internalId, field: 'Operational Current', message: result.notes, manufacturerRule: result.ruleId, validAlternatives: [] });
+    const operationalInvalid = result.operationalCurrentStatus === 'Invalid Manufacturer Configuration';
+    if (result.status === 'INVALID_MANUFACTURER_CONFIGURATION' || operationalInvalid) {
+      add(issue(`MFR:${breaker.internalId}:${result.ruleId}`, {
+        scope: breakerDisplayLabel(breaker),
+        internalId: breaker.internalId,
+        field: operationalInvalid ? 'Operational Current' : 'Breaker Configuration',
+        message: operationalInvalid ? result.notes : result.matchedRule,
+        manufacturerRule: result.ruleId,
+        validAlternatives: result.availableWidths || [],
+      }));
+    }
   });
-  return { valid: issues.length === 0, issues };
+  const list = [...issues.values()];
+  return { valid: list.length === 0, issues: list };
 }
 
 export function getConfigurationCompleteness(project, breakers) {
@@ -404,34 +575,32 @@ export function getConfigurationCompleteness(project, breakers) {
 }
 
 export function getBusbarRule(project, boardId, bus) {
-  const source = sourceFor(project.manufacturer);
   const allowedPositions = getValidBusbarPositions(project);
   const selectedPosition = boardConfiguration(project, boardId).busbarPositions?.[bus] || '';
-  const common = { boardId, bus, busId: bus === 'UPS Output Bus' ? 'BUS-B' : 'BUS-A', roleLabel: bus === 'UPS Output Bus' ? 'UPS Output / Critical Bus' : 'Input / Normal Bus', allowedPositions, selectedPosition: selectedPosition || null, source };
-  if (!selectedPosition) return { ...common, physicalPosition: 'Physical Position Not Confirmed', ruleId: 'BUSBAR_POSITION_CONFIRMATION_REQUIRED', classification: CONFIRMATION, confidence: CONFIRMATION, manufacturerRule: 'Select a physical position from the shared manufacturer database.', missingParameters: ['physical busbar position'] };
-  if (!allowedPositions.includes(selectedPosition)) return { ...common, physicalPosition: selectedPosition, ruleId: 'INVALID_BUSBAR_CONFIGURATION', classification: 'Invalid Manufacturer Configuration', confidence: 'Invalid Manufacturer Configuration', manufacturerRule: selectedPosition + ' is unsupported.', missingParameters: ['supported physical busbar position'] };
-  return { ...common, physicalPosition: selectedPosition, ruleId: project.manufacturer === 'ABB' ? 'ABB_MNSR_BUSBAR_POSITION_SELECTED' : 'SIEMENS_S8_BUSBAR_POSITION_SELECTED', classification: 'Manufacturer-Supported · User Selected', confidence: 'Manufacturer-Supported · User Selected', manufacturerRule: 'User-selected manufacturer-supported position: ' + selectedPosition + '.', missingParameters: [] };
-}
-export function getPhysicalDimensions(project) {
-  return {
-    heightMm: 2400,
-    depthMm: 1200,
-    classification: 'User Defined',
-    confidence: 'User Defined',
-    matchedRule: 'No matched manufacturer height/depth configuration is collected.',
-    missingParameters: project.manufacturer === 'Siemens' ? ['mounting design', 'busbar position', 'IP / ventilation', 'frame height'] : ['cubicle type', 'busbar compartment', 'selected foundation/depth configuration'],
-  };
+  const common = { boardId, bus, busId: bus === 'UPS Output Bus' ? 'BUS-B' : 'BUS-A', roleLabel: bus === 'UPS Output Bus' ? 'UPS Output / Critical Bus' : 'Input / Normal Bus', allowedPositions, selectedPosition: selectedPosition || null };
+  const withSource = rule => ({ ...rule, source: resolveRuleSource(rule.ruleId) });
+  if (!selectedPosition) return withSource({ ...common, physicalPosition: 'Physical Position Not Confirmed', ruleId: 'BUSBAR_POSITION_CONFIRMATION_REQUIRED', classification: CONFIRMATION, confidence: CONFIRMATION, manufacturerRule: 'Select a physical position from the shared manufacturer database.', missingParameters: ['physical busbar position'] });
+  if (!allowedPositions.includes(selectedPosition)) return withSource({ ...common, physicalPosition: selectedPosition, ruleId: 'INVALID_BUSBAR_CONFIGURATION', classification: 'Invalid Manufacturer Configuration', confidence: 'Invalid Manufacturer Configuration', manufacturerRule: selectedPosition + ' is unsupported.', missingParameters: ['supported physical busbar position'] });
+  return withSource({ ...common, physicalPosition: selectedPosition, ruleId: project.manufacturer === 'ABB' ? 'ABB_MNSR_BUSBAR_POSITION_SELECTED' : 'SIEMENS_S8_BUSBAR_POSITION_SELECTED', classification: 'Manufacturer-Supported · User Selected', confidence: 'Manufacturer-Supported · User Selected', manufacturerRule: 'User-selected manufacturer-supported position: ' + selectedPosition + '.', missingParameters: [] });
 }
 
-export function getRuleAudit() {
-  return [
-    { id: 'ABB_MNSR_ACB_STANDARDIZATION', result: 'E2.2 / E4.2 / E6.2 width and module', source: 'ABB MNS R printed p.22 Standardization', classification: 'Manufacturer Verified', usedBy: 'Shared engine / UI / Section / GA / Trace', action: 'KEEP' },
-    { id: 'ABB_MNSR_MCCB_STANDARDIZATION', result: 'XT / T5 / T6 width and module', source: 'ABB MNS R printed p.23 MCCB standardization', classification: 'Manufacturer Verified', usedBy: 'Shared engine / UI / Section / GA / Trace', action: 'KEEP' },
-    { id: 'ABB_MNSR_T6_T7_FOUR_BREAKER_800_AVAILABLE', result: 'Available: four E1.2, T6 or T7 in 800 mm, two top + two bottom', source: 'ABB MNS R printed p.22 footnote', classification: 'Manufacturer Confirmation Required', usedBy: 'Rule catalog only', action: 'DO NOT AUTO-PACK T6 630A WITHOUT COMPATIBILITY CONFIRMATION' },
-    { id: 'SIEMENS_S8_CONFIGURATION_REQUIRED', result: 'No generic width / packing result', source: 'SIVACON S8 printed pp.25-28, 33-38', classification: 'Manufacturer Confirmation Required', usedBy: 'Shared engine / UI / Section / GA / Trace', action: 'COLLECT CONFIGURATION BEFORE VERIFIED' },
-    { id: 'MCCB_PACKING_UNVERIFIED', result: 'No generic MCCB count or width cap', source: 'No compatible combination rule mapped for XT / 3VA', classification: 'Manufacturer Confirmation Required', usedBy: 'Shared section generator', action: 'DO NOT AUTO-PACK' },
-    { id: 'HEIGHT_DEPTH', result: '2400 x 1200 mm project display', source: 'No matched manufacturer configuration', classification: 'User Defined', usedBy: 'Summary', action: 'LABEL AS USER DEFINED' },
-  ];
+// Rule audit is generated from the shared metadata catalog (no hard-coded claims).
+export function getRuleAudit(manufacturer) {
+  return [...RULE_METADATA.values()]
+    .filter(rule => !manufacturer || rule.sourceType === 'APPLICATION' || rule.manufacturer === manufacturer || (rule.parentRuleId && RULE_METADATA.get(rule.parentRuleId)?.manufacturer === manufacturer))
+    .map(rule => {
+      const source = resolveRuleSource(rule.ruleId);
+      const parent = rule.parentRuleId ? RULE_METADATA.get(rule.parentRuleId) : null;
+      const result = rule.result ?? parent?.result;
+      return {
+        id: rule.ruleId,
+        result: typeof result === 'string' ? result : result ? JSON.stringify(result) : NOT_SPECIFIED,
+        source: source.sourceType === 'APPLICATION' ? 'Application rule (not manufacturer sourced)' : [source.document, source.revision, 'pdf p.' + source.pdfPage, 'printed p.' + source.printedPage, source.table].join(' · '),
+        classification: rule.confidence || parent?.confidence || NOT_SPECIFIED,
+        usedBy: rule.usage || NOT_SPECIFIED,
+        notes: rule.notes || (rule.parentRuleId ? 'Child of ' + rule.parentRuleId : ''),
+      };
+    });
 }
 
 export function getManufacturerRuleCatalog(manufacturer, system) {
@@ -441,9 +610,9 @@ export function getManufacturerRuleCatalog(manufacturer, system) {
 export function getAvailableManufacturerDimensions(project) {
   if (project.manufacturer === 'ABB' && project.system === 'MNS R') {
     const rule = MANUFACTURER_RULE_CATALOG.find(item => item.ruleId === 'ABB_MNSR_DIMENSIONS_AVAILABLE');
-    return { matched: false, classification: 'Manufacturer Verified', confidence: 'Manufacturer Verified', ruleId: rule.ruleId, availableConfigurations: rule.result, selectionStatus: 'Manufacturer Confirmation Required', source: rule };
+    return { matched: false, classification: 'Manufacturer Verified', confidence: 'Manufacturer Verified', ruleId: rule.ruleId, availableConfigurations: rule.result, selectionStatus: 'Not matched to current configuration', source: resolveRuleSource(rule.ruleId) };
   }
-  return { matched: false, classification: 'Manufacturer Confirmation Required', confidence: CONFIRMATION, ruleId: 'DIMENSIONS_CONFIGURATION_REQUIRED', availableConfigurations: null, selectionStatus: CONFIRMATION, source: sourceFor(project.manufacturer) };
+  return { matched: false, classification: CONFIRMATION, confidence: CONFIRMATION, ruleId: 'DIMENSIONS_CONFIGURATION_REQUIRED', availableConfigurations: null, selectionStatus: 'No manufacturer dimension data encoded', source: resolveRuleSource('DIMENSIONS_CONFIGURATION_REQUIRED') };
 }
 
 export function getSiemensConfigurationInputs() {
@@ -457,40 +626,14 @@ export function getSiemensConfigurationInputs() {
     { input: 'Unlisted multi-MCCB combination', classification: 'Manufacturer confirmation only', level: 'Manufacturer confirmation', table: 'No generic packing table', reason: 'Automatic multi-3VA packing is not proven.' },
   ];
 }
-export function buildDesignExport(project, breakers) {
-  const boardIds = switchboardIds(project);
-  const completeness = getConfigurationCompleteness(project, breakers);
-  const validation = validateDesignConfiguration(project, breakers);
-  const status = summarizeDesignStatus(project, breakers, breaker => evaluateBreaker(breaker, project), validation, completeness);
-  const sectionsBySwitchboard = boardIds.map(boardId => {
-    const sections = generateSections(breakers, project, boardId);
-    return {
-      switchboardId: boardId,
-      ratedMainBusCurrent: ratedMainBus(project, boardId),
-      ratingMode: project.switchboards?.[boardId]?.ratingMode || 'inherited',
-      sections,
-      totalWidthMm: sections.reduce((sum, section) => sum + Number(section.width || 0), 0),
-    };
-  });
+
+// Configuration value domains used by persistence normalization (no new manufacturer data).
+export function getConfigurationValueDomains() {
   return {
-    project,
-    designStatus: status.designStatus,
-    unresolvedConditions: status.unresolvedConditions,
-    invalidConditions: status.invalidConditions,
-    confidenceSummary: status.confidenceSummary,
-    designConfiguration: project.configuration || {},
-    configurationCompleteness: completeness,
-    configurationValidation: validation,
-    breakerSchedule: breakers.map(breaker => ({ ...breaker, displayLabel: breakerDisplayLabel(breaker), evaluation: evaluateBreaker(breaker, project) })),
-    switchboardQuantity: project.quantity,
-    switchboards: boardIds.map(boardId => ({ switchboardId: boardId, ratedMainBusCurrent: ratedMainBus(project, boardId), ratingMode: project.switchboards?.[boardId]?.ratingMode || 'inherited' })),
-    sectionsBySwitchboard,
-    busbarRules: boardIds.flatMap(boardId => [...new Set(breakers.filter(breaker => breaker.switchboardId === boardId).map(breaker => breaker.bus))].map(bus => ({ ...getBusbarRule(project, boardId, bus), ratedMainBusCurrent: ratedMainBus(project, boardId) }))),
-    combinedPlanningWidthMm: sectionsBySwitchboard.flatMap(item => item.sections).reduce((total, section) => total + section.width, 0),
-    totalWidthMm: sectionsBySwitchboard.flatMap(item => item.sections).reduce((total, section) => total + section.width, 0),
-    dimensions: { currentDesignDimension: getPhysicalDimensions(project), manufacturerListedDimensions: getAvailableManufacturerDimensions(project), matchedManufacturerDimension: null },
-    ruleAudit: getRuleAudit(),
-    exportConfidence: status.designStatus === 'VALID / MATCHED' ? 'Manufacturer conditions resolved for current configuration' : 'Draft - see unresolved and invalid conditions',
-    sourceReferences: Object.values(RULE_SOURCES),
+    busbarPositions: [...new Set([...CONFIG_OPTIONS.ABB.busbarPositions, ...CONFIG_OPTIONS.Siemens.busbarPositions])],
+    frontLayouts: [...CONFIG_OPTIONS.Siemens.frontLayouts],
+    connectionTypes: [...CONFIG_OPTIONS.Siemens.connectionTypes],
+    ventilation: [...CONFIG_OPTIONS.Siemens.ventilation],
+    mountingDesigns: [...CONFIG_OPTIONS.Siemens.mountingDesigns],
   };
 }

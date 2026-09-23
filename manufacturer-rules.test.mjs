@@ -7,12 +7,12 @@ import {
   getConfigurationCompleteness,
   getDesignConfigurationSchema,
   getManufacturerRuleCatalog,
-  getPhysicalDimensions,
   getSiemensConfigurationInputs,
   recommendBreaker,
   validateDesignConfiguration,
-  buildDesignExport,
 } from './manufacturer-rules.js';
+import { buildDesignExport } from './design-evaluation.js';
+import { getSwitchboardDimensions } from './project-model.js';
 
 const baseProject = (manufacturer = 'ABB') => ({
   manufacturer,
@@ -132,7 +132,7 @@ assert.equal(typeof completeness.percentage, 'number');
 const dimensions = getAvailableManufacturerDimensions(abb);
 assert.equal(dimensions.matched, false);
 assert.deepEqual(dimensions.availableConfigurations.heightsMm, [2200]);
-assert.equal(getPhysicalDimensions(abb).classification, 'User Defined');
+assert.equal(getSwitchboardDimensions(abb).heightStatus, 'NOT_DEFINED');
 
 // Catalog, input classification, recommendation, export, and two switchboards.
 assert.ok(getManufacturerRuleCatalog('ABB', 'MNS R').some(rule => rule.ruleId === 'ABB_MNSR_T6_T7_FOUR_BREAKER_800_AVAILABLE'));

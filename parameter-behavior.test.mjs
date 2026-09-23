@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
+import { buildDesignExport } from './design-evaluation.js';
+import { getSwitchboardDimensions } from './project-model.js';
 import {
-  buildDesignExport,
   evaluateBreaker,
   generateSections,
   getBusbarRule,
   getDesignConfigurationSchema,
-  getPhysicalDimensions,
   recommendBreaker,
 } from './manufacturer-rules.js';
 import { buildGaViewModel } from './ga-view-model.js';
@@ -49,7 +49,7 @@ function gaFor(project, breakers) {
     boardSections,
     busRules: (boardId, bus) => getBusbarRule(project, boardId, bus),
     evaluations: item => evaluateBreaker(item, project),
-    dimensions: getPhysicalDimensions(project),
+    dimensions: getSwitchboardDimensions(project),
   });
 }
 
@@ -133,14 +133,14 @@ for (const [pole, width] of [['3P', 600], ['4P', 800]]) {
   const item = breaker({ pole });
   assert.equal(evaluateBreaker(item, abb).widthMm, width);
   assert.equal(generateSections([item], abb, 'SWB-01')[0].width, width);
-  assert.equal(gaFor(abb, [item]).boards[0].totalWidthMm, width);
-  assert.equal(buildDesignExport(abb, [item]).totalWidthMm, width);
+  assert.equal(gaFor(abb, [item]).boards[0].combinedPlanningWidthMm, width);
+  assert.equal(buildDesignExport(abb, [item]).combinedPlanningWidthMm, width);
 }
 const e12 = breaker({ internalId: 'e12', frame: 'E1.2', rating: '1250A' });
 for (const width of [600, 800]) {
   abb.configuration.breakers.e12 = { cubicleWidthMm: width };
   assert.equal(evaluateBreaker(e12, abb).widthMm, width);
-  assert.equal(buildDesignExport(abb, [e12]).sectionsBySwitchboard[0].totalWidthMm, width);
+  assert.equal(buildDesignExport(abb, [e12]).sectionsBySwitchboard[0].combinedPlanningWidthMm, width);
 }
 
 // ABB and Siemens busbar positions remain electrical-role independent and propagate into GA/export.
@@ -188,9 +188,9 @@ two.configuration.switchboards = {
 };
 const twoExport = buildDesignExport(two, [b1, b2, b3]);
 assert.equal(twoExport.sectionsBySwitchboard.length, 2);
-assert.equal(twoExport.sectionsBySwitchboard[0].totalWidthMm, 1600);
-assert.equal(twoExport.sectionsBySwitchboard[1].totalWidthMm, 800);
-assert.equal(twoExport.totalWidthMm, 2400);
+assert.equal(twoExport.sectionsBySwitchboard[0].combinedPlanningWidthMm, 1600);
+assert.equal(twoExport.sectionsBySwitchboard[1].combinedPlanningWidthMm, 800);
+assert.equal(twoExport.combinedPlanningWidthMm, 2400);
 assert.equal(gaFor(two, [b1, b2, b3]).boards.length, 2);
 
 // Main-bus rating and user-defined H/D do not silently alter manufacturer width; they remain explicit in GA/export.
@@ -198,10 +198,10 @@ const busRatingProject = projectFor('ABB', { mainBus: '5000 A' });
 busRatingProject.configuration.switchboards['SWB-01'] = { busbarPositions: { 'Input Bus': 'Top' } };
 const busRatingGa = gaFor(busRatingProject, [breaker()]);
 assert.equal(busRatingGa.boards[0].ratedMainBus, '5000 A');
-assert.equal(busRatingGa.boards[0].totalWidthMm, 800);
+assert.equal(busRatingGa.boards[0].combinedPlanningWidthMm, 800);
 const finalExport = buildDesignExport(busRatingProject, [breaker()]);
 assert.equal(finalExport.project.mainBus, '5000 A');
-assert.equal(finalExport.dimensions.currentDesignDimension.classification, 'User Defined');
+assert.equal(finalExport.dimensions.switchboardDimensions.heightStatus, 'NOT_DEFINED');
 assert.equal(finalExport.breakerSchedule[0].evaluation.ruleId, evaluateBreaker(breaker(), busRatingProject).ruleId);
 
 console.log('full parameter-to-behavior shared-chain tests passed');
