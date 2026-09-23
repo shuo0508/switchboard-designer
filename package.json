@@ -2,7 +2,7 @@
     "scripts": {
         "build": "vite build",
         "dev": "vite --host 127.0.0.1",
-        "test": "node manufacturer-rules.test.mjs && node ga-view-model.test.mjs && node parameter-behavior.test.mjs && node ux-remediation.test.mjs && node phase1-regression.test.mjs",
+        "test": "node manufacturer-rules.test.mjs && node ga-view-model.test.mjs && node parameter-behavior.test.mjs && node ux-remediation.test.mjs && node phase1-regression.test.mjs && node phase2b-source.test.mjs",
         "test:e2e": "node e2e/browser-e2e.mjs"
     },
     "devDependencies": {

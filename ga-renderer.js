@@ -82,9 +82,12 @@ function busY(bus, index, mode) {
   return 148 + index * 164;
 }
 
+const WIDTH_SUFFIX = { VERIFIED: '', USER_SELECTED: ' (user sel.)', PARTIALLY_VERIFIED: ' (partial)', PROVISIONAL: ' (prov.)' };
+const WIDTH_ARIA = { VERIFIED: 'verified', USER_SELECTED: 'manufacturer-supported user selected', PARTIALLY_VERIFIED: 'partially verified', PROVISIONAL: 'provisional' };
+
 function confidenceClass(value) {
   if (value === 'Manufacturer Verified') return 'is-verified';
-  if (value === 'Manufacturer-Supported · User Selected') return 'is-supported';
+  if (value === 'Manufacturer-Supported · User Selected' || value === 'Partially Verified') return 'is-supported';
   if (value === 'Invalid Manufacturer Configuration') return 'is-invalid';
   return 'is-schematic';
 }
@@ -129,14 +132,14 @@ function renderBoard(board, options) {
   const layoutByKey = new Map(layout.sections.map(item => [item.key, item]));
   board.sections.forEach(section => {
     const { x, width } = layoutByKey.get(section.key), bus = board.buses.find(item => item.id === section.busId), y = busY(bus, board.buses.indexOf(bus), mode);
-    const group = svgElement('g', { class: `ga-cubicle ${confidenceClass(section.confidence)}${selected?.type === 'section' && selected.key === section.key ? ' is-selected' : ''}`, tabindex: 0, role: 'button', 'aria-label': `${section.id} ${section.widthMm} millimetres ${section.widthStatus === 'VERIFIED' ? 'verified' : 'provisional'}` });
+    const group = svgElement('g', { class: `ga-cubicle ${confidenceClass(section.confidence)}${selected?.type === 'section' && selected.key === section.key ? ' is-selected' : ''}`, tabindex: 0, role: 'button', 'aria-label': `${section.id} ${section.widthMm} millimetres ${WIDTH_ARIA[section.widthStatus] || 'provisional'}` });
     group.append(svgElement('rect', { x, y: 76, width, height: 354, class: 'ga-cubicle-body' }));
     group.append(svgElement('line', { x1: x, y1: 101, x2: x + width, y2: 101, class: 'ga-cubicle-header-line' }));
     text(group, x + width / 2, 94, section.id, 'ga-section-title', 'middle');
     section.breakers.forEach((breaker, index) => drawBreaker(group, breaker, section, x + index * width / section.breakers.length, width / section.breakers.length, y, markers.flow));
     const dimY = 444;
     group.append(svgElement('line', { x1: x + 6, y1: dimY, x2: x + width - 6, y2: dimY, class: 'ga-dimension-line', 'marker-start': `url(#${markers.dimension})`, 'marker-end': `url(#${markers.dimension})` }));
-    text(group, x + width / 2, dimY - 5, `${section.widthMm} mm${section.widthStatus === 'VERIFIED' ? '' : ' (prov.)'}`, 'ga-dimension-text', 'middle');
+    text(group, x + width / 2, dimY - 5, `${section.widthMm} mm${WIDTH_SUFFIX[section.widthStatus] ?? ' (prov.)'}`, 'ga-dimension-text', 'middle');
     group.dataset.sectionKey = section.key;
     group.dataset.widthPx = String(width);
     group.addEventListener('click', () => onSelectSection(section)); group.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') onSelectSection(section); }); svg.append(group);

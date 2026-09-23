@@ -100,7 +100,8 @@ try {
   check('H5 H/D persisted after reload', (await text('#physicalDimensions')).includes('H 2200 mm'));
 
   // C1 / M12: 10 x XT4 is not a verified 6000 mm lineup.
-  await loadWithState({ project: abbProject(), breakers: Array.from({ length: 10 }, (_, index) => xt4('xt4-' + index)) });
+  const powerCenter = Object.fromEntries(Array.from({ length: 10 }, (_, index) => ['xt4-' + index, { cubicleType: 'POWER_CENTER' }]));
+  await loadWithState({ project: abbProject({ configuration: { switchboards: { 'SWB-01': { busbarPositions: { 'Input Bus': 'Top' } } }, breakers: powerCenter } }), breakers: Array.from({ length: 10 }, (_, index) => xt4('xt4-' + index)) });
   const c1Status = await text('#designStatus');
   check('C1 10 x XT4 not VALID / MATCHED', c1Status !== 'VALID / MATCHED', c1Status);
   const totalText = await text('#total');
@@ -109,6 +110,7 @@ try {
   const recText = await text('#rec');
   check('C1 WHY THIS SIZE separates device data and section planning width', (await text('#min')).includes('Manufacturer Verified') && recText.includes('Provisional Planning Width'), `${await text('#min')} | ${recText}`);
   check('C1 packing status shown in trace', (await text('#why')).includes('PACKING: UNRESOLVED'));
+  check('2B WHY THIS SIZE names ABB cubicle type and source table', (await text('#why')).includes('ABB MNS R p.22 Power Center Breakers [POWER_CENTER]') && (await text('#why')).includes('CUBICLE TYPE: POWER_CENTER'), await text('#why'));
 
   // Export dialog for a draft design; then M6 Esc safety.
   await evaluate(`globalThis.__lastExport=null; document.querySelector('#reportBtn').click(); true`);
@@ -179,7 +181,9 @@ try {
   // M1: Rule Trace resolves through shared metadata.
   await evaluate(`document.querySelector('#rows tr td').click(); true`);
   const sourceText = await text('#source');
-  check('M1 Rule Trace resolves Table 3/2-3/4 metadata', sourceText.includes('resolvedRuleId: SIEMENS_S8_3WA_TABLE_3_4') && sourceText.includes('pdfPage: 31'), sourceText.slice(0, 200));
+  check('M1 Rule Trace resolves Table 3/2-3/4 metadata', sourceText.includes('resolvedRuleId: SIEMENS_S8_3WA_TABLE_3_4_G1') && sourceText.includes('pdfPage: 31') && sourceText.includes('Status 01/2025 V3-korr'), sourceText.slice(0, 300));
+  const specText = await text('#spec');
+  check('2B Rule Trace shows derived Siemens table and user-selected width', specText.includes('table: Table 3/4 G1') && specText.includes('User-selected width 600 mm') && specText.includes('AUTO SELECTION'), specText.slice(0, 300));
 
   // M9: hostile persisted strings are normalized / escaped, never executed.
   const hostile = '<img src=x onerror="window.__xss=1">';

@@ -37,7 +37,8 @@ assert.equal(evaluateBreaker(breaker({ frame: 'E6.2', pole: '4P', rating: '6300A
 const e12 = breaker({ internalId: 'e12', frame: 'E1.2', rating: '1250A' });
 assert.equal(evaluateBreaker(e12, abb).confidence, 'Manufacturer Confirmation Required');
 abb.configuration.breakers.e12 = { cubicleWidthMm: 800 };
-assert.equal(evaluateBreaker(e12, abb).ruleId, 'ABB_MNSR_E1_2_SELECTED_WIDTH');
+assert.equal(evaluateBreaker(e12, abb).ruleId, 'ABB_MNSR_PC_BREAKERS__E1.2_4P');
+assert.equal(evaluateBreaker(e12, abb).confidence, 'Manufacturer-Supported · User Selected');
 assert.equal(evaluateBreaker(e12, abb).widthMm, 800);
 
 const abbFrames = [
@@ -47,7 +48,8 @@ const abbFrames = [
   ['T6 630A', 'Tmax T6', '630A', '4P', '24E'],
 ];
 abbFrames.forEach(([frame, series, rating, pole, module]) => {
-  const result = evaluateBreaker(breaker({ series, frame, rating, pole, type: 'MCCB' }), abb);
+  abb.configuration.breakers['mcc-' + frame] = { cubicleType: 'MCC_PLUG_IN' };
+  const result = evaluateBreaker(breaker({ internalId: 'mcc-' + frame, series, frame, rating, pole, type: 'MCCB', direction: 'Outgoing', function: 'FEEDER' }), abb);
   assert.equal(result.widthMm, 600);
   assert.equal(result.module, module);
 });
@@ -83,7 +85,7 @@ assert.equal(waMatched.confidence, 'Manufacturer Verified');
 
 const wa3p = { ...wa, internalId: 'wa3p', pole: '3P' };
 siemens.configuration.breakers.wa3p = { connectionType: 'Cable' };
-assert.equal(evaluateBreaker(wa3p, siemens).ruleId, 'SIEMENS_S8_CUBICLE_WIDTH_SELECTION_REQUIRED');
+assert.equal(evaluateBreaker(wa3p, siemens).ruleId, 'SIEMENS_S8_3WA_LAYOUT_TABLES_PREREQUISITES__CUBICLE_WIDTH_SELECTION_REQUIRED');
 siemens.configuration.breakers.wa3p.cubicleWidthMm = 600;
 assert.equal(evaluateBreaker(wa3p, siemens).widthMm, 600);
 
@@ -101,7 +103,7 @@ assert.equal(vaResult.operationalCurrentStatus, 'Manufacturer Verified');
 
 const vaTop = { ...va, internalId: 'va-top', route: 'Top' };
 siemens.configuration.breakers['va-top'] = { ventilation: 'Ventilated' };
-assert.ok(evaluateBreaker(vaTop, siemens).missingParameters.some(item => item.includes('Table 3/17')));
+assert.ok(evaluateBreaker(vaTop, siemens).missingParameters.some(item => item.includes('Tab. 3/17')));
 
 // Siemens Table 3/4 two-rear-bus configuration.
 const siemensTwoBus = baseProject('Siemens');
@@ -113,7 +115,7 @@ const twoBusBreakers = [
 siemensTwoBus.configuration.breakers['wa-a'] = { connectionType: 'Cable' };
 siemensTwoBus.configuration.breakers['wa-b'] = { connectionType: 'Cable' };
 assert.equal(validateDesignConfiguration(siemensTwoBus, twoBusBreakers).valid, true);
-assert.equal(evaluateBreaker(twoBusBreakers[0], siemensTwoBus).table, 'Table 3/4');
+assert.equal(evaluateBreaker(twoBusBreakers[0], siemensTwoBus).table, 'Table 3/4 G1');
 
 const invalidPosition = structuredClone(siemensTwoBus);
 invalidPosition.configuration.switchboards['SWB-01'].busbarPositions['Input Bus'] = 'Center';

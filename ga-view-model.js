@@ -69,7 +69,7 @@ export function buildGaViewModel({ project, breakers, boardSections, busRules, e
         rawSection: section,
       };
     });
-    const provisional = modelSections.filter(section => section.widthStatus !== 'VERIFIED');
+    const provisional = modelSections.filter(section => section.widthStatus === 'PROVISIONAL');
     return {
       id: boardId,
       manufacturer: project.manufacturer,

@@ -37,6 +37,7 @@ function normalizeConfiguration(raw, legacyBusbarLayouts) {
     });
     const entry = { busbarPositions: positions };
     if (domains.frontLayouts.includes(board.frontLayout)) entry.frontLayout = board.frontLayout;
+    if (domains.frameHeightsMm.includes(Number(board.frameHeightMm))) entry.frameHeightMm = Number(board.frameHeightMm);
     switchboards[boardId] = entry;
   });
   const breakers = {};
@@ -48,6 +49,8 @@ function normalizeConfiguration(raw, legacyBusbarLayouts) {
     if (domains.connectionTypes.includes(config.connectionType)) entry.connectionType = config.connectionType;
     if (domains.mountingDesigns.includes(config.mountingDesign)) entry.mountingDesign = config.mountingDesign;
     if (domains.ventilation.includes(config.ventilation)) entry.ventilation = config.ventilation;
+    if (domains.cubicleTypes.includes(config.cubicleType)) entry.cubicleType = config.cubicleType;
+    if (domains.breakingCapacityClasses.includes(config.breakingCapacityClass)) entry.breakingCapacityClass = config.breakingCapacityClass;
     breakers[internalId] = entry;
   });
   return { switchboards, breakers };
@@ -76,11 +79,12 @@ export function normalizeProject(raw) {
 }
 
 function applyRecommendation(breaker, project) {
-  const recommendation = recommendBreaker({ ...breaker, manufacturer: project.manufacturer, system: project.system });
+  const recommendation = recommendBreaker({ ...breaker, manufacturer: project.manufacturer, system: project.system }, project);
   breaker.series = recommendation.series;
   breaker.frame = recommendation.frame;
   breaker.type = recommendation.type;
   breaker.recommendationClass = recommendation.classification;
+  breaker.recommendation = { status: recommendation.status, policy: recommendation.policy, candidates: recommendation.candidates.map(item => item.frame) };
 }
 
 function legacyArrayToObject(row) {

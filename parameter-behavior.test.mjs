@@ -87,16 +87,16 @@ for (const route of ['Top', 'Bottom']) {
   assert.equal(exported.breakerSchedule[0].evaluation.ruleId, evaluation.ruleId);
 }
 
-// Siemens route changes the Table 3/17 operational-current result while width remains Table 3/16 400 mm.
+// Siemens route changes the Table 3/17 operational-current result while width remains Tab. 3/16 nominal 400 mm.
 const siemensRoute = projectFor('Siemens');
 siemensRoute.configuration.switchboards['SWB-01'] = { busbarPositions: { 'Input Bus': 'Rear Top' } };
-for (const [route, expectedCurrent] of [['Top', 630], ['Bottom', 625]]) {
-  const item = breaker({ internalId: 'va-' + route, series: 'SENTRON 3VA', frame: '3VA1563', rating: '600A', pole: '4P', type: 'MCCB', route });
-  siemensRoute.configuration.breakers[item.internalId] = { ventilation: 'Non-ventilated' };
+for (const [route, expectedCurrent, expectedConfidence] of [['Top', 630, 'Partially Verified'], ['Bottom', 625, 'Invalid Manufacturer Configuration']]) {
+  const item = breaker({ internalId: 'va-' + route, series: 'SENTRON 3VA', frame: '3VA1563', rating: '630A', pole: '4P', type: 'MCCB', route });
+  siemensRoute.configuration.breakers[item.internalId] = { ventilation: 'Non-ventilated', mountingDesign: 'Fixed-mounted' };
   const result = evaluateBreaker(item, siemensRoute);
   assert.equal(result.widthMm, 400);
   assert.equal(result.operationalCurrent, expectedCurrent);
-  assert.equal(result.confidence, 'Manufacturer Verified');
+  assert.equal(result.confidence, expectedConfidence);
   assert.equal(gaFor(siemensRoute, [item]).boards[0].sections[0].breakers[0].route, route);
   assert.equal(buildDesignExport(siemensRoute, [item]).breakerSchedule[0].evaluation.operationalCurrent, expectedCurrent);
 }
@@ -110,9 +110,9 @@ assert.equal(gaFor(partialProject, [partialVa]).boards[0].confidence, 'Manufactu
 
 // Representative ratings drive manufacturer-specific recommendations.
 const recommendationCases = [
-  ['ABB', '160A', 'Tmax XT', 'XT4', 'MCCB'],
+  ['ABB', '160A', 'Tmax XT', 'XT1', 'MCCB'],
   ['ABB', '400A', 'Tmax T5', 'T5 400A', 'MCCB'],
-  ['ABB', '630A', 'Tmax T6', 'T6 630A', 'MCCB'],
+  ['ABB', '630A', 'Tmax T5', 'T5 630A', 'MCCB'],
   ['ABB', '1250A', 'Emax 2', 'E1.2', 'ACB'],
   ['ABB', '3200A', 'Emax 2', 'E4.2', 'ACB'],
   ['ABB', '6300A', 'Emax 2', 'E6.2', 'ACB'],
@@ -165,11 +165,17 @@ assert.equal(evaluateBreaker(wa3p, waProject).widthMm, 800);
 
 const waHigh = breaker({ internalId: 'wa-high', series: 'SENTRON 3WA', frame: '3WA1363', rating: '6300A', pole: '4P' });
 waProject.configuration.breakers['wa-high'] = { connectionType: 'Busbar', mountingDesign: 'Withdrawable Unit' };
-assert.equal(evaluateBreaker(waHigh, waProject).ruleId, 'SIEMENS_S8_FRONT_LAYOUT_REQUIRED');
+const highMissing = evaluateBreaker(waHigh, waProject);
+assert.equal(highMissing.confidence, 'Manufacturer Confirmation Required');
+assert.ok(highMissing.missingParameters.some(item => item.startsWith('Frame height 2200 mm')));
+assert.ok(getDesignConfigurationSchema(waProject, [waHigh]).switchboards[0].controls.some(control => control.key === 'frameHeightMm' && control.required));
+waProject.configuration.switchboards['SWB-01'].frameHeightMm = 2200;
 for (const frontLayout of ['Single Front', 'Double Front']) {
   waProject.configuration.switchboards['SWB-01'].frontLayout = frontLayout;
   const result = evaluateBreaker(waHigh, waProject);
   assert.equal(result.widthMm, 1000);
+  assert.equal(result.table, 'Table 3/3 G1');
+  assert.equal(result.confidence, 'Manufacturer Verified');
   assert.equal(result.userConfiguration.frontLayout, frontLayout);
 }
 assert.ok(getDesignConfigurationSchema(waProject, [waHigh]).switchboards[0].controls.some(control => control.key === 'frontLayout'));

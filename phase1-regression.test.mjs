@@ -35,6 +35,7 @@ const breaker = (overrides = {}) => ({
 {
   const p = project();
   const xt4 = Array.from({ length: 10 }, (_, index) => breaker({ id: 'CB-' + String(index + 1).padStart(2, '0') }));
+  xt4.forEach(item => { p.configuration.breakers[item.internalId] = { cubicleType: 'POWER_CENTER' }; });
   xt4.forEach(item => assert.equal(evaluateBreaker(item, p).confidence, 'Manufacturer Verified', 'device data unchanged'));
   xt4.forEach(item => assert.equal(evaluateBreaker(item, p).module, '8E', 'manufacturer module unchanged'));
   const sections = generateSections(xt4, p, 'SWB-01');
@@ -214,11 +215,11 @@ const breaker = (overrides = {}) => ({
   for (const manufacturer of ['ABB', 'Siemens']) {
     const catalog = getProductCatalog(manufacturer);
     const positions = manufacturer === 'ABB' ? ['', 'Top', 'Center', 'Bottom'] : ['', 'Top', 'Rear Top', 'Rear Bottom'];
-    for (const position of positions) for (const series of catalog.series) for (const frame of catalog.framesBySeries[series]) for (const pole of catalog.poles) for (const connectionType of ['', 'Cable', 'Busbar']) for (const width of [0, 400, 600, 800]) {
+    for (const position of positions) for (const series of catalog.series) for (const frame of catalog.framesBySeries[series]) for (const pole of catalog.poles) for (const connectionType of ['', 'Cable', 'Busbar']) for (const width of [0, 400, 600, 800]) for (const cubicleType of manufacturer === 'ABB' ? ['', 'POWER_CENTER', 'MCC_PLUG_IN'] : ['']) {
       const p = project(manufacturer);
       p.configuration.switchboards['SWB-01'].busbarPositions['Input Bus'] = position;
       const item = breaker({ internalId: 'k', series, frame, pole, rating: '1000A', type: series === 'Emax 2' || series === 'SENTRON 3WA' ? 'ACB' : 'MCCB' });
-      p.configuration.breakers.k = { connectionType, cubicleWidthMm: width || undefined, ventilation: 'Ventilated' };
+      p.configuration.breakers.k = { connectionType, cubicleWidthMm: width || undefined, ventilation: 'Ventilated', cubicleType: cubicleType || undefined };
       ruleIds.add(evaluateBreaker(item, p).ruleId);
       ruleIds.add(getBusbarRule(p, 'SWB-01', 'Input Bus').ruleId);
       const schema = getDesignConfigurationSchema(p, [item]);
@@ -230,7 +231,7 @@ const breaker = (overrides = {}) => ({
   ruleIds.forEach(ruleId => assert.notEqual(resolveRuleSource(ruleId).sourceType, 'UNRESOLVED', ruleId + ' must resolve'));
   const table32 = resolveRuleSource('SIEMENS_S8_3WA_TABLE_3_2');
   assert.deepEqual([table32.parentRuleId, table32.table, table32.pdfPage, table32.printedPage], ['SIEMENS_S8_3WA_LAYOUT_TABLES_PREREQUISITES', 'Table 3/2', '29', '25']);
-  assert.equal(resolveRuleSource('ABB_MNSR_ACB_E4.2_4P').resolvedRuleId, 'ABB_MNSR_ACB_STANDARDIZATION');
+  assert.equal(resolveRuleSource('ABB_MNSR_PC_BREAKERS__E4.2_4P').resolvedRuleId, 'ABB_MNSR_PC_BREAKERS');
   assert.equal(resolveRuleSource('NO_VERIFIED_RULE').pdfPage, 'Not specified in source metadata');
   assert.equal(resolveRuleSource('UNKNOWN_RULE_X').sourceType, 'UNRESOLVED');
   getRuleAudit().forEach(row => assert.notEqual(resolveRuleSource(row.id).sourceType, 'UNRESOLVED'));
@@ -242,6 +243,7 @@ const breaker = (overrides = {}) => ({
   const p = project();
   const acb = breaker({ function: 'MAIN_INPUT', direction: 'Incoming', series: 'Emax 2', frame: 'E4.2', rating: '3200A', type: 'ACB' });
   const mccb = breaker({ id: 'CB-02' });
+  p.configuration.breakers[mccb.internalId] = { cubicleType: 'POWER_CENTER' };
   const exported = buildDesignExport(p, [acb, mccb]);
   assert.equal(exported.containsProvisionalWidth, true);
   assert.equal(exported.widthSummary.verifiedSectionWidthMm, 800);

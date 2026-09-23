@@ -30,14 +30,22 @@ export function sectionsBySwitchboard(project, breakers) {
 }
 
 function widthSummary(sections) {
-  const verified = sections.filter(section => section.widthStatus === SECTION_WIDTH_STATUS.VERIFIED);
-  const provisional = sections.filter(section => section.widthStatus !== SECTION_WIDTH_STATUS.VERIFIED);
+  const byStatus = status => sections.filter(section => section.widthStatus === status);
+  const verified = byStatus(SECTION_WIDTH_STATUS.VERIFIED);
+  const userSelected = byStatus(SECTION_WIDTH_STATUS.USER_SELECTED);
+  const partiallyVerified = byStatus(SECTION_WIDTH_STATUS.PARTIALLY_VERIFIED);
+  const provisional = byStatus(SECTION_WIDTH_STATUS.PROVISIONAL);
   const sum = list => list.reduce((total, section) => total + Number(section.width || 0), 0);
   return {
     verifiedSectionWidthMm: sum(verified),
+    userSelectedSectionWidthMm: sum(userSelected),
+    partiallyVerifiedWidthMm: sum(partiallyVerified),
     provisionalPlanningWidthMm: sum(provisional),
     combinedPlanningWidthMm: sum(sections),
     containsProvisionalWidth: provisional.length > 0,
+    containsNonVerifiedWidth: verified.length !== sections.length,
+    userSelectedSections: userSelected.map(section => section.boardId + ':' + section.id),
+    partiallyVerifiedSections: partiallyVerified.map(section => section.boardId + ':' + section.id),
     provisionalSections: provisional.map(section => section.boardId + ':' + section.id),
     unresolvedPackingSections: sections.filter(section => section.packingStatus === PACKING_STATUS.UNRESOLVED).map(section => section.boardId + ':' + section.id),
   };
@@ -68,8 +76,10 @@ export function designStatus(project, breakers) {
   const results = evaluations.map(item => item.result);
   const confidenceSummary = {
     manufacturerMatched: results.filter(result => result.confidence === 'Manufacturer Verified').length,
+    userSelected: results.filter(result => result.confidence === 'Manufacturer-Supported · User Selected').length,
+    partiallyVerified: results.filter(result => result.confidence === 'Partially Verified').length,
     confirmationRequired: results.filter(result => result.confidence === CONFIRMATION).length,
-    engineeringEstimate: sections.filter(section => section.widthStatus !== SECTION_WIDTH_STATUS.VERIFIED).length,
+    engineeringEstimate: sections.filter(section => section.widthStatus === SECTION_WIDTH_STATUS.PROVISIONAL).length,
     invalid: invalidConditions.length,
     electricalConflicts: electricalConflicts.length,
     unresolved: unresolvedConditions.length,
@@ -97,6 +107,7 @@ function exportSection(section, breakers) {
     arrangementConfidence: section.confidence,
     arrangement: section.arrangement,
     deviceRuleId: section.deviceRuleId,
+    deviceTable: section.deviceTable,
     deviceConfidence: section.deviceConfidence,
     deviceWidthMm: section.deviceWidthMm,
     deviceModule: section.deviceModule,
@@ -148,6 +159,7 @@ export function buildDesignExport(project, breakers) {
       routeMode: breaker.routeMode,
       seriesMode: breaker.seriesMode,
       frameMode: breaker.frameMode,
+      recommendation: breaker.recommendation || null,
       sectionKey: sectionIdByBreaker.get(breaker.internalId) || null,
       evaluation: evaluateBreaker(breaker, project),
     })),
