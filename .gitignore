@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment / secrets
+.env
+.env.*
+
+# Logs
+*.log
+
+# Manufacturer manuals (ABB / Siemens) - keep local only
+*.pdf
+*.PDF

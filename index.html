@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Multi-Breaker Switchboard Designer</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside>
+      <div class="brand"><span>Switchboard</span><small>Engineering Intelligence</small></div>
+      <nav class="nav"><div class="active" id="workbenchNav">Design Workbench</div></nav>
+      <div class="note"><small>RULE ENGINE STATUS</small><b>Manufacturer-first</b><span>Verified dimensions are preferred over estimates.</span></div>
+    </aside>
+    <main>
+      <header>
+        <div><p class="crumb">PROJECT / SWITCHBOARD DESIGN</p><h1>MULTI-BREAKER SWITCHBOARD DESIGNER</h1></div>
+        <span class="build-marker">DEV BUILD: MULTI-CB-V2</span>
+        <button id="reportBtn">Export Design Basis Report ↗</button>
+      </header>
+      <section class="project">
+        <div><p class="eyebrow">PROJECT / SWITCHBOARD PARAMETERS</p><h2>Design the complete switchboard, with traceable decisions.</h2></div>
+        <div class="project-fields">
+          <label>Switchboard Manufacturer<select id="projectManufacturer"><option>ABB</option><option>Siemens</option></select></label>
+          <label>Switchboard System<select id="projectSystem"></select></label>
+          <label>Default Rated Main Bus Current<select id="mainBus"><option>6300 A</option><option>5000 A</option><option>3200 A</option></select></label><label>Inherited Cable Route<select id="defaultRoute"><option>Top</option><option>Bottom</option></select></label>
+        </div>
+        <div class="layout-mode"><small>SWITCHBOARD QUANTITY / LAYOUT MODE</small><div><button id="oneBoard" class="active">1 Switchboard</button><button id="twoBoards">2 Switchboards</button></div></div>
+      </section>
+      <section class="board-rating-panel" id="boardRatings" aria-label="Rated Main Bus Current by switchboard"></section>
+      <p class="route-help">Cable Route defines where the external cable enters or exits the switchboard. It does not define power-flow direction or busbar position.</p>
+      <section class="design-configuration" id="designConfiguration" aria-label="Design Configuration"></section>
+      <div class="layout">
+        <section class="schedule">
+          <div class="section-head"><div><p class="eyebrow">BREAKER SCHEDULE</p><h3>Breaker Schedule <span id="count"></span></h3></div><div><button id="reset">Reset Example</button><button class="add" id="add">＋ Add Breaker</button></div></div>
+          <div class="toolbar"><button id="duplicate">Duplicate Selected</button><span id="inheritNote">Inherited from Switchboard</span><span>Local persistence enabled</span></div>
+          <div class="table-wrap"><table><thead><tr><th>CB</th><th>Switchboard</th><th>Function</th><th>Rating</th><th>Series</th><th>Frame</th><th>Pole</th><th>Cable Route</th><th>Action</th></tr></thead><tbody id="rows"></tbody></table></div>
+          <div class="ga"><div class="section-head ga-section-head"><div><p class="eyebrow">PROFESSIONAL AUTOMATIC GA</p><h3>Engineering GA / Power Flow <span id="busLabel">6300 A</span></h3></div><div class="ga-head-actions"><b id="gaTotal"></b><div class="ga-controls" aria-label="GA display controls"><button id="gaSchematic" type="button">Schematic</button><button id="gaPhysical" type="button">Physical</button><span class="ga-zoom"><button id="gaZoomOut" type="button" aria-label="Zoom out">−</button><output id="gaZoomLabel">100%</output><button id="gaZoomIn" type="button" aria-label="Zoom in">+</button></span><button id="gaZoomReset" type="button">Reset zoom</button></div></div></div><div class="ga-legend"><span><i class="legend-solid"></i> Manufacturer Matched</span><span><i class="legend-dashed"></i> Schematic / Derived</span><span><i class="legend-warning">!</i> Manufacturer Confirmation Required</span><span><i class="legend-flow">→</i> Power Flow</span><span>TOP / BOTTOM = Cable Route</span></div><div id="busbarConfig" class="busbar-config"></div><div class="ga-svg-list" id="ga"></div></div>
+        </section>
+        <aside class="inspector"><p class="eyebrow">ENGINEERING EVALUATION / RULE TRACE</p><h3 id="selectedTitle">Select a breaker or section to inspect.</h3><div class="inspector-spec" id="spec"></div><div class="metric"><small>Manufacturer minimum</small><b id="min">-</b></div><div class="metric accent"><small>Engineering recommendation</small><b id="rec">-</b></div><div class="trace"><small>WHY THIS SIZE / LAYOUT?</small><b id="rule">-</b><p id="why">Select a breaker or section to inspect.</p><div class="source">▣ <span id="source">-</span></div></div></aside>
+      </div>
+      <section class="summary"><div><p class="eyebrow">DESIGN BASIS REPORT</p><h3>SWITCHBOARD DESIGN SUMMARY</h3><p>Generated sections and engineering confidence summary.</p></div><div class="summary-metrics"><div><small id="widthLabel">Switchboard Width</small><b id="total">-</b></div><div><small>Height / Depth · User Defined</small><b id="physicalDimensions">2400 <i>× 1200 mm</i></b></div><div><small>Section Count</small><b id="sections">-</b></div><div><small>Breaker Count</small><b id="breakerCount">-</b></div><div class="confidence-summary"><small>ENGINEERING CONFIDENCE SUMMARY</small><b id="designStatus">-</b><span id="confidenceCounts">-</span><span id="criticalItems">-</span></div></div></section>
+      <section class="summary rule-audit"><div><p class="eyebrow">RULE AUDIT REPORT</p><h3>Engineering Rules Audit</h3><p>Every dimension rule is classified by source confidence.</p></div><div class="audit-wrap"><table><thead><tr><th>Rule ID</th><th>Result</th><th>Source</th><th>Classification</th><th>Used By</th><th>Action</th></tr></thead><tbody id="ruleAuditRows"></tbody></table></div></section>      <footer>Confidence: <b>Rule classification shown per result</b><span>Final manufacturer confirmation required where marked</span></footer>
+    </main>
+  </div>
+  <dialog id="confirmationDialog" class="confirmation-dialog">
+    <form method="dialog">
+      <p class="eyebrow" id="dialogEyebrow">DESIGN CHANGE</p>
+      <h3 id="dialogTitle">Confirm change</h3>
+      <div id="dialogBody"></div>
+      <div class="dialog-actions"><button value="cancel" id="dialogCancel">Cancel</button><button value="apply" class="primary" id="dialogApply">Apply</button></div>
+    </form>
+  </dialog>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
