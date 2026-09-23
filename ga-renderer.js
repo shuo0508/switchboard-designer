@@ -118,8 +118,12 @@ function renderBoard(board, options) {
   const { mode, zoom, selected, onSelectSection, onSelectBus } = options;
   const card = document.createElement('article'); card.className = 'ga-engineering-board';
   const header = document.createElement('div'); header.className = 'ga-engineering-header';
-  const widthText = `W ${board.combinedPlanningWidthMm} mm${board.containsProvisionalWidth ? ' · includes ' + board.provisionalPlanningWidthMm + ' mm Provisional Planning Width' : ' · Verified Section Width'}`;
-  header.innerHTML = `<div><span class="ga-board-tag">${escapeHtml(board.id)}</span><b>${escapeHtml(board.manufacturer + ' ' + board.system)}</b><small>Rated Main Bus ${escapeHtml(board.ratedMainBus)}</small></div><div class="ga-board-facts"><span>${escapeHtml(widthText)}</span><span>${escapeHtml(board.dimensions.label)}</span><span>GA Confidence · ${escapeHtml(board.confidence)}</span></div>`;
+  const widthParts = [
+    board.containsProvisionalWidth ? board.provisionalPlanningWidthMm + ' mm Provisional Planning Width' : '',
+    board.containsQualifiedWidth ? board.qualifiedPlanningWidthMm + ' mm Qualified Width (Partially Verified / User Selected)' : '',
+  ].filter(Boolean);
+  const widthText = `W ${board.combinedPlanningWidthMm} mm${widthParts.length ? ' · includes ' + widthParts.join(' · ') : ' · Verified Section Width'}`;
+  header.innerHTML = `<div><span class="ga-board-tag">${escapeHtml(board.id)}</span><b>${escapeHtml(board.manufacturer + ' ' + board.system)}</b><small>Rated Main Bus ${escapeHtml(board.ratedMainBus)}</small></div><div class="ga-board-facts"><span>${escapeHtml(widthText)}</span><span>${escapeHtml(board.dimensions.label)}</span>${board.designStatus ? `<span>Design Status · ${escapeHtml(board.designStatus)}</span>` : ''}<span>Lowest Section Confidence · ${escapeHtml(board.confidence)}</span></div>`;
   card.append(header);
   if (!board.sections.length) { const empty = document.createElement('p'); empty.className = 'ga-empty'; empty.textContent = 'No breakers assigned.'; card.append(empty); return card; }
   const layout = computeBoardLayout(board);
@@ -166,7 +170,7 @@ function renderBoard(board, options) {
     if (busSegments.length) multiline(svg, 10, y - 30, [bus.id, bus.role, String(bus.rating), `Position: ${bus.physicalPosition}`, bus.confidence], 'ga-bus-data', 'start', 12);
   });
   svg.append(svgElement('line', { x1: GA_SIDE_PX + 6, y1: 486, x2: GA_SIDE_PX + lineupWidth - 6, y2: 486, class: 'ga-total-dimension', 'marker-start': `url(#${markers.dimension})`, 'marker-end': `url(#${markers.dimension})` }));
-  text(svg, GA_SIDE_PX + lineupWidth / 2, 478, `COMBINED PLANNING WIDTH ${board.combinedPlanningWidthMm} mm${board.containsProvisionalWidth ? ' · CONTAINS PROVISIONAL' : ''}`, 'ga-total-text', 'middle');
+  text(svg, GA_SIDE_PX + lineupWidth / 2, 478, `COMBINED PLANNING WIDTH ${board.combinedPlanningWidthMm} mm${board.containsProvisionalWidth ? ' · CONTAINS PROVISIONAL' : ''}${board.containsQualifiedWidth ? ' · CONTAINS QUALIFIED' : ''}`, 'ga-total-text', 'middle');
   scroll.append(svg); card.append(scroll); return card;
 }
 

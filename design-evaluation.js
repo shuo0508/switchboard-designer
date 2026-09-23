@@ -16,14 +16,28 @@ import { validateElectricalConsistency } from './electrical-validation.js';
 import { breakerDisplayLabel, getSwitchboardDimensions, ratedMainBus, ratingMode, switchboardIds } from './project-model.js';
 import { functionDefinition } from './topology.js';
 
+// Four design-level states, computed only by designStatus().
+//   INVALID                      at least one Invalid Manufacturer Configuration or Electrical Design Conflict
+//   INCOMPLETE                   at least one confirmation / NOT_ESTABLISHED / missing required condition
+//   RESOLVED WITH QUALIFICATIONS nothing unresolved, but a result is Partially Verified or User Selected
+//   VALID / MATCHED              every active result fully Manufacturer Verified
 export const DESIGN_STATUS = {
   INVALID: 'INVALID',
-  ELECTRICAL_CONFLICT: 'ELECTRICAL DESIGN CONFLICT',
   INCOMPLETE: 'INCOMPLETE',
+  QUALIFIED: 'RESOLVED WITH QUALIFICATIONS',
   VALID: 'VALID / MATCHED',
 };
 
+export const DESIGN_STATUS_WORDING = {
+  [DESIGN_STATUS.VALID]: 'All required manufacturer conditions resolved; every section result is Manufacturer Verified.',
+  [DESIGN_STATUS.QUALIFIED]: 'No unresolved or invalid conditions, but the design contains qualified results (Partially Verified and/or Manufacturer-Supported · User Selected). Not fully Manufacturer Verified.',
+  [DESIGN_STATUS.INCOMPLETE]: 'Draft - manufacturer confirmation, NOT_ESTABLISHED or missing configuration conditions remain unresolved.',
+  [DESIGN_STATUS.INVALID]: 'Invalid - the design contains Invalid Manufacturer Configuration and/or Electrical Design Conflict conditions.',
+};
+
 const CONFIRMATION = 'Manufacturer Confirmation Required';
+const QUALIFIED_DEVICE_STATUS = ['PARTIALLY_VERIFIED', 'MANUFACTURER_SUPPORTED_USER_SELECTED'];
+const QUALIFIED_WIDTH_STATUS = [SECTION_WIDTH_STATUS.PARTIALLY_VERIFIED, SECTION_WIDTH_STATUS.USER_SELECTED];
 
 export function sectionsBySwitchboard(project, breakers) {
   return switchboardIds(project).map(boardId => ({ boardId, sections: generateSections(breakers, project, boardId) }));
@@ -52,7 +66,7 @@ function widthSummary(sections) {
 }
 
 export function designStatus(project, breakers) {
-  const evaluations = breakers.map(breaker => ({ breaker, result: evaluateBreaker(breaker, project) }));
+  const evaluations = breakers.map(breaker => ({ breaker, result: evaluateBreaker(breaker, project, breakers) }));
   const validation = validateDesignConfiguration(project, breakers);
   const completeness = getConfigurationCompleteness(project, breakers);
   const electrical = validateElectricalConsistency(project, breakers);
@@ -69,6 +83,19 @@ export function designStatus(project, breakers) {
   sections
     .filter(section => section.packingStatus === PACKING_STATUS.UNRESOLVED)
     .forEach(section => addUnresolved({ issueId: `UNRESOLVED:PACKING:${section.boardId}:${section.id}`, category: 'MCCB packing', scope: section.boardId + ' / ' + section.id, condition: 'MCCB section packing unresolved: ' + section.packingMissingParameters.join(', '), sourceRule: section.packingRuleId }));
+  // A provisional (Engineering Estimate) section width is never a resolved manufacturer fit.
+  sections
+    .filter(section => section.widthStatus === SECTION_WIDTH_STATUS.PROVISIONAL)
+    .forEach(section => addUnresolved({ issueId: `UNRESOLVED:WIDTH:${section.boardId}:${section.id}`, category: 'Section width', scope: section.boardId + ' / ' + section.id, condition: 'Provisional planning width (Engineering Estimate): ' + section.deviceConfidence, sourceRule: section.deviceRuleId }));
+
+  // Qualified (resolved but not fully verified) results.
+  const qualified = new Map();
+  evaluations
+    .filter(({ breaker, result }) => activeBoards.has(breaker.switchboardId) && QUALIFIED_DEVICE_STATUS.includes(result.status))
+    .forEach(({ breaker, result }) => qualified.set(`QUALIFIED:DEVICE:${breaker.internalId}`, { issueId: `QUALIFIED:DEVICE:${breaker.internalId}`, category: 'Device rule', scope: breakerDisplayLabel(breaker), confidence: result.confidence, condition: result.widthReason || result.matchedRule, sourceRule: result.ruleId }));
+  sections
+    .filter(section => QUALIFIED_WIDTH_STATUS.includes(section.widthStatus))
+    .forEach(section => qualified.set(`QUALIFIED:WIDTH:${section.boardId}:${section.id}`, { issueId: `QUALIFIED:WIDTH:${section.boardId}:${section.id}`, category: 'Section width', scope: section.boardId + ' / ' + section.id, confidence: section.confidence, condition: section.widthLabel, sourceRule: section.deviceRuleId }));
 
   const invalidConditions = validation.issues.map(item => ({ issueId: item.issueId, classification: item.classification, scope: item.scope, field: item.field, message: item.message, manufacturerRule: item.manufacturerRule || null }));
   const electricalConflicts = electrical.issues.map(item => ({ issueId: item.issueId, classification: item.classification, scope: item.scope, field: item.field, message: item.message, ruleId: item.ruleId }));
@@ -85,11 +112,19 @@ export function designStatus(project, breakers) {
     unresolved: unresolvedConditions.length,
     packingUnresolved: sections.filter(section => section.packingStatus === PACKING_STATUS.UNRESOLVED).length,
   };
-  const status = invalidConditions.length ? DESIGN_STATUS.INVALID
-    : electricalConflicts.length ? DESIGN_STATUS.ELECTRICAL_CONFLICT
-      : unresolvedConditions.length ? DESIGN_STATUS.INCOMPLETE
+  const qualifiedConditions = [...qualified.values()];
+  confidenceSummary.qualified = qualifiedConditions.length;
+  const status = invalidConditions.length || electricalConflicts.length ? DESIGN_STATUS.INVALID
+    : unresolvedConditions.length ? DESIGN_STATUS.INCOMPLETE
+      : qualifiedConditions.length ? DESIGN_STATUS.QUALIFIED
         : DESIGN_STATUS.VALID;
-  return { designStatus: status, unresolvedConditions, invalidConditions, electricalConflicts, confidenceSummary, validation, completeness, electrical, boards, widths: widthSummary(sections) };
+  const statusBasis = [
+    ...(invalidConditions.length ? ['Invalid Manufacturer Configuration'] : []),
+    ...(electricalConflicts.length ? ['Electrical Design Conflict'] : []),
+    ...(unresolvedConditions.length ? ['Unresolved conditions'] : []),
+    ...(qualifiedConditions.length ? ['Qualified results'] : []),
+  ];
+  return { designStatus: status, designStatusWording: DESIGN_STATUS_WORDING[status], statusBasis, unresolvedConditions, invalidConditions, electricalConflicts, qualifiedConditions, confidenceSummary, validation, completeness, electrical, boards, widths: widthSummary(sections) };
 }
 
 function exportSection(section, breakers) {
@@ -132,6 +167,9 @@ export function buildDesignExport(project, breakers) {
       dimensions: { heightMm: dimensions.heightMm, depthMm: dimensions.depthMm },
     },
     designStatus: status.designStatus,
+    designStatusWording: status.designStatusWording,
+    statusBasis: status.statusBasis,
+    qualifiedConditions: status.qualifiedConditions,
     unresolvedConditions: status.unresolvedConditions,
     invalidConditions: status.invalidConditions,
     electricalConflicts: status.electricalConflicts,
@@ -160,8 +198,9 @@ export function buildDesignExport(project, breakers) {
       seriesMode: breaker.seriesMode,
       frameMode: breaker.frameMode,
       recommendation: breaker.recommendation || null,
+      performanceLevel: project.configuration?.breakers?.[breaker.internalId]?.performanceLevel || null,
       sectionKey: sectionIdByBreaker.get(breaker.internalId) || null,
-      evaluation: evaluateBreaker(breaker, project),
+      evaluation: evaluateBreaker(breaker, project, breakers),
     })),
     switchboardQuantity: project.quantity,
     switchboards: switchboardIds(project).map(boardId => ({ switchboardId: boardId, ratedMainBusCurrent: ratedMainBus(project, boardId), ratingMode: ratingMode(project, boardId) })),
@@ -178,7 +217,7 @@ export function buildDesignExport(project, breakers) {
     busbarRules: switchboardIds(project).flatMap(boardId => [...new Set(breakers.filter(breaker => breaker.switchboardId === boardId).map(breaker => breaker.bus))].map(bus => ({ ...getBusbarRule(project, boardId, bus), ratedMainBusCurrent: ratedMainBus(project, boardId) }))),
     dimensions: { switchboardDimensions: dimensions, manufacturerListedDimensions: getAvailableManufacturerDimensions(project), matchedManufacturerDimension: null },
     ruleAudit: getRuleAudit(project.manufacturer),
-    exportConfidence: status.designStatus === DESIGN_STATUS.VALID ? 'Manufacturer conditions resolved for current configuration' : 'Draft - see unresolved, invalid and electrical conflict conditions',
+    exportConfidence: status.designStatusWording,
     sourceReferences: Object.values(RULE_SOURCES),
   };
 }

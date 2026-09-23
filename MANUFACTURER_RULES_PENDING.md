@@ -1,6 +1,6 @@
 # Manufacturer Rules — Remaining Confirmation Items
 
-Status after **Phase 2B** (branch `claude/full-engineering-review`).
+Status after **Phase 2C** (branch `claude/full-engineering-review`).
 Phase 2B encoded the Phase 2A source extraction (S1–S14) in `manufacturer-data/` and aligned
 `manufacturer-rules.js` with it. Everything below is **still open**: the engine reports these
 cases as *Manufacturer Confirmation Required* or *Not Established By Provided Source* and does
@@ -24,14 +24,29 @@ Sources:
 | H3 ABB p.22 / p.23 | Power Center and MCC plug-in kept separate; MCCB cubicle type is a required input. |
 | H7 Siemens 3VA | Single 3VA fixed-mounted → 400 mm *Partially Verified* ("generally"); Tab. 3/17 all 36 values. |
 
+## Resolved in Phase 2C (Phase 2B independent verification findings)
+
+| Finding | Now |
+|---|---|
+| L1 Siemens Tab. 3/17 | Operational current is displayed as manufacturer information only; never compared with the breaker rated current, never used for AUTO. Top busbar + top entry = NOT_ESTABLISHED. |
+| A1 ABB p.22 "600 mm / 800 mm**" | Single E1.2 / T6 / T7 = 600 mm (Verified when the other p.22 conditions match). 800 mm belongs to the ** four-breaker arrangement only: catalogued, Manufacturer Confirmation Required, never offered or applied. |
+| C1 Design Status | Four states: VALID / MATCHED, RESOLVED WITH QUALIFICATIONS, INCOMPLETE, INVALID (Electrical Design Conflict is listed separately as a basis of INVALID). |
+| C2 Emax 2 performance level | Explicit input. Rating listed only for some levels → level required; incompatible level → Invalid. |
+| L2 Siemens busbar systems | Only buses with breakers on the switchboard select Tab. 3/3 vs 3/4. |
+| L3 Siemens 3WA rating | Below the listed rated device current → Confirmation (setting not established); above → Invalid. |
+| C3 ABB device notes | XT1 Plug-In In max 125 A (p.32) and T5 630 P/W derating (p.36) are in the trace; breaker execution is not collected, so affected ratings are Confirmation. |
+| F1 Siemens Tab. 3/3 fn 4) | Marked SOURCE_AMBIGUOUS; deviations are Confirmation, never Invalid (see below). |
+| U1 AUTO | No source-backed candidate → no series / frame selected ("No source-backed candidate"). |
+| L4 Stale configuration | Breaker configuration is revalidated against the rule engine on every change. |
+
 ## ABB MNS R — open
 
 1. **Trip-unit In values below Iu** (e.g. XT4 100 A, E1.2 500 A): not listed in the provided source.
-2. **p.22 footnote \*\*** — four breakers (E1.2 / T6 / T7) in an 800 mm cubicle: catalogued only.
+2. **p.22 footnote \*\*** — four breakers (E1.2 / T6 / T7) in an 800 mm cubicle: catalogued only; no single-breaker 800 mm width.
    Rating, pole combination, busbar, cable, auxiliary space and mounting conditions not established.
 3. **p.22 footnote \*** — step-up option: not modelled.
-4. **p.22 width alternatives** E1.2 / T6 / T7 600 vs 800 mm: no selection condition in the source;
-   user selection is labelled *Manufacturer-Supported · User Selected*.
+4. **Breaker execution** (fixed / plug-in / withdrawable) inside MNS R Power Center and MCC plug-in modules:
+   not established, so XT1 above 125 A and T5 630 at 630 A remain *Manufacturer Confirmation Required*.
 5. **p.23 MCC plug-in modules as incomers**: the source lists "Energy distribution" only.
 6. **Main busbar module table (p.22)**: catalogued, not evaluated; "Rated current" column unlabeled.
 7. **MCCB packing / compartment arrangement** (p.14, 20–21): no automatic multi-MCCB packing.
@@ -41,8 +56,12 @@ Sources:
 
 ## Siemens SIVACON S8 — open
 
-1. **Table 3/3 G2 footnote 4)** (3WA1350 cable): "max. 100 kA" is not collected by the application,
-   so a fully configured 3WA1350 G2 cubicle stays *Manufacturer Confirmation Required*.
+1. **Table 3/3 G2 footnote 4)** (3WA1350 cable) — **SOURCE_AMBIGUOUS, not reconciled**:
+   - fn 4): "Main busbar up to 7,010A rear-bottom, cable connection bottom, 3WA1350 H, C (max. 100kA), double front 1,200mm deep".
+   - p.104 (printed p.100): "The incoming feeder / outgoing feeder 5,000 A with cable connection *opposed* to the main busbar
+     rear-bottom is only implemented as a double front and absolutely requires a special cubicle at the rear".
+   - Concepts involved: rear-bottom, cable connection side, H / C class, double front, 1,200 mm depth, max. 100 kA,
+     special rear cubicle. "max. 100 kA" is not collected. Any deviation or missing item → *Manufacturer Confirmation Required*.
 2. **Width alternatives** (e.g. 400 / 600, 600 / 800, 800 / 1000): no selection condition in the source.
 3. **§3.4 3VA "generally 400 mm"**: exceptions not defined → *Partially Verified*.
 4. **3VA plug-in / withdrawable**: "information from Siemens on request" (Tab. 3/1).

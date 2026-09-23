@@ -124,8 +124,8 @@ try {
 
   // H4: incomer above Rated Main Bus Current.
   await loadWithState({ project: abbProject({ switchboards: { 'SWB-01': { ratedMainBus: '3200 A', ratingMode: 'override' } } }), breakers: [acb('inc', { frame: 'E6.2', rating: '6300A' })] });
-  check('H4 3200 A bus + 6300 A incomer -> Electrical Design Conflict', (await text('#designStatus')) === 'ELECTRICAL DESIGN CONFLICT', await text('#designStatus'));
-  check('H4 listed separately from manufacturer invalids', (await text('#designConfiguration .config-status')).includes('Electrical Design Conflicts'));
+  check('H4 3200 A bus + 6300 A incomer -> Design INVALID (basis: Electrical Design Conflict)', (await text('#designStatus')) === 'INVALID' && (await text('#designConfiguration .config-status')).includes('Basis: Electrical Design Conflict'), await text('#designStatus'));
+  check('H4 listed separately from manufacturer invalids', (await text('#designConfiguration .config-status')).includes('Electrical Design Conflicts') && !(await text('#designConfiguration .config-status')).includes('Invalid Manufacturer Conditions'));
   await evaluate(`globalThis.__lastExport=null; document.querySelector('#reportBtn').click(); true`);
   await evaluate(`document.querySelector('#dialogApply').click(); true`); await sleep(200);
   await evaluate(`globalThis.__lastExport=null; document.querySelector('#reportBtn').click(); true`);
@@ -184,6 +184,56 @@ try {
   check('M1 Rule Trace resolves Table 3/2-3/4 metadata', sourceText.includes('resolvedRuleId: SIEMENS_S8_3WA_TABLE_3_4_G1') && sourceText.includes('pdfPage: 31') && sourceText.includes('Status 01/2025 V3-korr'), sourceText.slice(0, 300));
   const specText = await text('#spec');
   check('2B Rule Trace shows derived Siemens table and user-selected width', specText.includes('table: Table 3/4 G1') && specText.includes('User-selected width 600 mm') && specText.includes('AUTO SELECTION'), specText.slice(0, 300));
+
+  // 2C C1: a Partially Verified 3VA design is RESOLVED WITH QUALIFICATIONS in Summary, Design Configuration, GA and Export.
+  await loadWithState({ project: { manufacturer: 'Siemens', mainBus: '6300 A', quantity: 1, configuration: { switchboards: { 'SWB-01': { busbarPositions: { 'Input Bus': 'Rear Top' } } }, breakers: { va: { ventilation: 'Ventilated', mountingDesign: 'Fixed-mounted' } } } }, breakers: [acb('va', { function: 'UPS_INPUT_LOAD', series: 'SENTRON 3VA', frame: '3VA1563', rating: '630A' })] });
+  const qualifiedTexts = [await text('#designStatus'), await text('#designConfiguration .completeness b'), await text('.ga-board-facts')];
+  check('2C Partially Verified design is RESOLVED WITH QUALIFICATIONS everywhere', qualifiedTexts[0] === 'RESOLVED WITH QUALIFICATIONS' && qualifiedTexts[1] === 'RESOLVED WITH QUALIFICATIONS' && qualifiedTexts[2].includes('Design Status · RESOLVED WITH QUALIFICATIONS') && qualifiedTexts[2].includes('400 mm Qualified Width') && !qualifiedTexts[2].includes('Verified Section Width'), qualifiedTexts.join(' | '));
+  await evaluate(`globalThis.__lastExport=null; document.querySelector('#reportBtn').click(); true`);
+  check('2C qualified export requires confirmation', await evaluate(`document.querySelector('#confirmationDialog').open`));
+  await evaluate(`document.querySelector('#dialogApply').click(); true`); await sleep(200);
+  const qualifiedExport = await evaluate(`globalThis.__lastExport && [globalThis.__lastExport.designStatus, globalThis.__lastExport.exportConfidence]`);
+  check('2C qualified export wording is not "resolved"', qualifiedExport?.[0] === 'RESOLVED WITH QUALIFICATIONS' && !qualifiedExport[1].includes('Manufacturer conditions resolved for current configuration'), JSON.stringify(qualifiedExport));
+  check('2C Tab. 3/17 operational current shown separately from breaker rated current', (await text('#spec')).includes('manufacturerOperationalCurrent: 630 A') && (await text('#spec')).includes('breakerRatedCurrent: 630A'));
+
+  // 2C U1: no source-backed AUTO candidate leaves the frame unselected and says so.
+  await loadWithState({ project: abbProject(), breakers: [{ internalId: 'nc', id: 'CB-01', function: 'UPS_INPUT_LOAD', rating: '315A', pole: '4P', route: 'Bottom', routeMode: 'explicit', seriesMode: 'auto', frameMode: 'auto', switchboardId: 'SWB-01', assignmentMode: 'inherited' }] });
+  const noCandidate = await evaluate(`[document.querySelector('#rows select[data-col="frame"]').selectedOptions[0]?.textContent, document.querySelector('#rows .state-badge.no-candidate')?.textContent]`);
+  check('2C no-source-backed candidate: frame unselected in schedule', noCandidate[0] === 'No source-backed candidate' && noCandidate[1].includes('NO SOURCE-BACKED CANDIDATE'), JSON.stringify(noCandidate));
+  check('2C no-source-backed candidate: Rule Trace NO_ESTABLISHED_CANDIDATE', (await text('#rule')) === 'NO_ESTABLISHED_CANDIDATE' && (await text('#designStatus')) === 'INCOMPLETE', await text('#rule'));
+
+  // 2C data flow: Rule Engine → Section → Design Status → GA → WHY THIS SIZE → Rule Trace → Export agree.
+  const flowCases = [
+    ['ABB Emax 2 E4.2 3200A', abbProject(), [acb('f1', { frame: 'E4.2', rating: '3200A', pole: '3P' })]],
+    ['ABB Emax 2 E4.2 2000A (level missing)', abbProject(), [acb('f1', { frame: 'E4.2', rating: '2000A', pole: '3P' })]],
+    ['ABB T6 Power Center', abbProject({ configuration: { switchboards: { 'SWB-01': { busbarPositions: { 'Input Bus': 'Top' } } }, breakers: { f1: { cubicleType: 'POWER_CENTER' } } } }), [acb('f1', { function: 'UPS_INPUT_LOAD', series: 'Tmax T6', frame: 'T6 630A', rating: '630A' })]],
+    ['ABB XT4 Power Center', abbProject({ configuration: { switchboards: { 'SWB-01': { busbarPositions: { 'Input Bus': 'Top' } } }, breakers: { f1: { cubicleType: 'POWER_CENTER' } } } }), [xt4('f1')]],
+    ['ABB XT4 MCC Plug-in', abbProject({ configuration: { switchboards: { 'SWB-01': { busbarPositions: { 'Input Bus': 'Top' } } }, breakers: { f1: { cubicleType: 'MCC_PLUG_IN' } } } }), [xt4('f1')]],
+    ['Siemens 3WA1232 3P user width', { manufacturer: 'Siemens', mainBus: '6300 A', quantity: 1, configuration: { switchboards: { 'SWB-01': { busbarPositions: { 'Input Bus': 'Top' } } }, breakers: { f1: { connectionType: 'Cable', cubicleWidthMm: 600 } } } }, [acb('f1', { series: 'SENTRON 3WA', frame: '3WA1232', rating: '3200A', pole: '3P' })]],
+    ['Siemens 3VA partially verified', { manufacturer: 'Siemens', mainBus: '6300 A', quantity: 1, configuration: { switchboards: { 'SWB-01': { busbarPositions: { 'Input Bus': 'Rear Bottom' } } }, breakers: { f1: { ventilation: 'Non-ventilated', mountingDesign: 'Fixed-mounted' } } } }, [acb('f1', { function: 'UPS_INPUT_LOAD', series: 'SENTRON 3VA', frame: '3VA1580', rating: '800A' })]],
+    ['Invalid manufacturer configuration', { manufacturer: 'Siemens', mainBus: '6300 A', quantity: 1, configuration: { switchboards: { 'SWB-01': { busbarPositions: { 'Input Bus': 'Top' } } }, breakers: { f1: { connectionType: 'Busbar' } } } }, [acb('f1', { series: 'SENTRON 3WA', frame: '3WA1106', rating: '630A' })]],
+    ['Electrical design conflict', abbProject({ switchboards: { 'SWB-01': { ratedMainBus: '3200 A', ratingMode: 'override' } } }), [acb('f1', { frame: 'E6.2', rating: '6300A' })]],
+    ['No source-backed candidate', abbProject(), [{ internalId: 'f1', id: 'CB-01', function: 'UPS_INPUT_LOAD', rating: '500A', pole: '4P', route: 'Bottom', routeMode: 'explicit', seriesMode: 'auto', frameMode: 'auto', switchboardId: 'SWB-01', assignmentMode: 'inherited' }]],
+  ];
+  for (const [label, flowProject, flowBreakers] of flowCases) {
+    await loadWithState({ project: flowProject, breakers: flowBreakers });
+    await evaluate(`document.querySelector('#rows tr td').click(); true`);
+    await evaluate(`globalThis.__lastExport=null; document.querySelector('#reportBtn').click(); true`);
+    if (await evaluate(`document.querySelector('#confirmationDialog').open`)) { await evaluate(`document.querySelector('#dialogApply').click(); true`); }
+    await sleep(200);
+    const flow = await evaluate(`(() => { const x = globalThis.__lastExport; const ev = x.breakerSchedule[0].evaluation; const sec = x.sectionsBySwitchboard[0].sections[0];
+      return { ok: document.querySelector('#designStatus').textContent === x.designStatus
+        && document.querySelector('#designConfiguration .completeness b').textContent === x.designStatus
+        && document.querySelector('.ga-board-facts').textContent.includes('Design Status · ' + x.designStatus)
+        && document.querySelector('#rule').textContent === ev.ruleId
+        && document.querySelector('#why').textContent.includes(ev.confidence) && document.querySelector('#why').textContent.includes('TABLE: ' + ev.table)
+        && document.querySelector('#rec').textContent.includes(sec.widthLabel)
+        && document.querySelector('#source').textContent.includes('ruleId: ' + ev.ruleId)
+        && document.querySelector('.ga-cubicle').getAttribute('aria-label').includes(String(sec.widthMm))
+        && x.exportConfidence.length > 0,
+        status: x.designStatus, confidence: ev.confidence, rule: ev.ruleId, width: sec.widthStatus }; })()`);
+    check('2C data flow agrees · ' + label, flow?.ok === true, JSON.stringify(flow));
+  }
 
   // M9: hostile persisted strings are normalized / escaped, never executed.
   const hostile = '<img src=x onerror="window.__xss=1">';

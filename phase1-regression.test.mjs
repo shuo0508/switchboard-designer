@@ -64,13 +64,15 @@ const breaker = (overrides = {}) => ({
   assert.equal(buildDesignExport(p, [acb]).containsProvisionalWidth, false);
 }
 
-// C. SWB rating 3200 A + Main Incomer 6300 A -> Electrical Design Conflict (not a manufacturer invalid).
+// C. SWB rating 3200 A + Main Incomer 6300 A -> Design INVALID on the basis of an Electrical Design Conflict
+//    (listed separately from manufacturer invalids).
 {
   const p = project();
   setRatedMainBus(p, 'SWB-01', '3200 A');
   const incomer = breaker({ function: 'MAIN_INPUT', direction: 'Incoming', series: 'Emax 2', frame: 'E6.2', rating: '6300A', type: 'ACB' });
   const status = designStatus(p, [incomer]);
-  assert.equal(status.designStatus, DESIGN_STATUS.ELECTRICAL_CONFLICT);
+  assert.equal(status.designStatus, DESIGN_STATUS.INVALID);
+  assert.deepEqual(status.statusBasis, ['Electrical Design Conflict']);
   assert.equal(status.electricalConflicts.length, 1);
   assert.equal(status.electricalConflicts[0].classification, 'Electrical Design Conflict');
   assert.equal(status.invalidConditions.length, 0);
@@ -178,7 +180,8 @@ const breaker = (overrides = {}) => ({
   const va = breaker({ internalId: 'va', series: 'SENTRON 3VA', frame: '3VA1563', rating: '1000A', type: 'MCCB' });
   const result = evaluateBreaker(va, p);
   assert.equal(result.status, 'INVALID_MANUFACTURER_CONFIGURATION');
-  assert.equal(result.operationalCurrentStatus, 'Invalid Manufacturer Configuration');
+  assert.ok(result.conflicts.some(item => item.includes('exceeds rated device current')), 'invalid because 1000 A exceeds the 630 A device, not because of Tab. 3/17');
+  assert.equal(result.operationalCurrentStatus, 'Manufacturer Verified', 'Tab. 3/17 value is informational');
   assert.equal(validateDesignConfiguration(p, [va]).issues.length, 1);
   const status = designStatus(p, [va]);
   assert.equal(status.invalidConditions.length, 1);

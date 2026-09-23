@@ -36,12 +36,20 @@ export const ABB_BREAKER_CATALOG = {
     iuByPerformanceLevel: { H: [4000, 5000, 6300], V: [4000, 5000, 6300], X: [4000, 5000, 6300] },
     ruleId: 'ABB_EMAX2_E2_E4_E6_RATINGS',
   },
-  XT1: { family: 'Tmax XT', type: 'MCCB', poles: ['3P', '4P'], iuA: [160], versions: ['Fixed', 'Plug-in'], notes: ['XT1 Plug-In In max = 125 A (footnote 2)'], ruleId: 'ABB_TMAX_XT_RATINGS' },
+  XT1: {
+    family: 'Tmax XT', type: 'MCCB', poles: ['3P', '4P'], iuA: [160], versions: ['Fixed', 'Plug-in'], notes: ['XT1 Plug-In In max = 125 A (footnote 2)'], ruleId: 'ABB_TMAX_XT_RATINGS',
+    // Execution-dependent source note (p.32 footnote (2)). Applies to the breaker's Plug-In execution only.
+    executionNotes: [{ id: 'XT1_PLUG_IN_IN_MAX', text: 'XT1 Plug-In In max = 125A (p.32 footnote (2))', executions: ['Plug-in'], affectsRatingAboveA: 125, pdfPage: '32' }],
+  },
   XT2: { family: 'Tmax XT', type: 'MCCB', poles: ['3P', '4P'], iuA: [160], versions: ['Fixed', 'Withdrawable', 'Plug-in'], ruleId: 'ABB_TMAX_XT_RATINGS' },
   XT3: { family: 'Tmax XT', type: 'MCCB', poles: ['3P', '4P'], iuA: [250], versions: ['Fixed', 'Plug-in'], ruleId: 'ABB_TMAX_XT_RATINGS' },
   XT4: { family: 'Tmax XT', type: 'MCCB', poles: ['3P', '4P'], iuA: [160, 250], versions: ['Fixed', 'Withdrawable', 'Plug-in'], ruleId: 'ABB_TMAX_XT_RATINGS' },
   T4: { family: 'Tmax', type: 'MCCB', poles: ['3P', '4P'], iuA: [250, 320], versions: ['Fixed', 'Withdrawable', 'Plug-in'], ruleId: 'ABB_TMAX_T_RATINGS', exposedInApplication: false },
-  T5: { family: 'Tmax', type: 'MCCB', poles: ['3P', '4P'], iuA: [400, 630], versions: ['Fixed', 'Withdrawable', 'Plug-in'], notes: ['Nominal current of T5 630 in the P/W version is derated by 10% (p.36 note)'], ruleId: 'ABB_TMAX_T_RATINGS' },
+  T5: {
+    family: 'Tmax', type: 'MCCB', poles: ['3P', '4P'], iuA: [400, 630], versions: ['Fixed', 'Withdrawable', 'Plug-in'], notes: ['Nominal current of T5 630 in the P/W version is derated by 10% (p.36 note)'], ruleId: 'ABB_TMAX_T_RATINGS',
+    // Execution-dependent source note (p.36 Note). Applies to the Plug-in / Withdrawable execution of T5 630 only.
+    executionNotes: [{ id: 'T5_630_PW_DERATING', text: 'The nominal current of T5 630 in the P/W version is derated by 10% (p.36 Note)', executions: ['Plug-in', 'Withdrawable'], appliesToIuA: 630, pdfPage: '36' }],
+  },
   T6: { family: 'Tmax', type: 'MCCB', poles: ['3P', '4P'], iuA: [630, 800, 1000], versions: ['Fixed', 'Withdrawable'], notes: ['W not available for T6 1000 A (footnote 4)'], ruleId: 'ABB_TMAX_T_RATINGS' },
   T7: { family: 'Tmax', type: 'MCCB', poles: ['3P', '4P'], iuA: [800, 1000, 1250, 1600], versions: ['Fixed', 'Withdrawable'], ruleId: 'ABB_TMAX_T_RATINGS', exposedInApplication: false },
 };
@@ -74,7 +82,9 @@ export const ABB_POWER_CENTER_BREAKERS = {
     '**': 'Four breakers type E1.2, T6 or T7 can be installed in a cubicle 800mm wide; two CBs at the top and two CBs at the bottom',
   },
   rows: [
-    { sourceBreaker: 'Emax1.2', frames: ['E1.2'], position: 'Vertical', poles: ['3P', '4P'], module: '22E', widthsMm: [600, 800], widthFootnotes: { 800: ['**'] } },
+    // Source cell "600 mm / 800 mm**": the ** footnote is attached to the 800 mm arrangement (four breakers).
+    // Only 600 mm is established as an ordinary single-breaker width; 800 mm is kept as the ** arrangement.
+    { sourceBreaker: 'Emax1.2', frames: ['E1.2'], position: 'Vertical', poles: ['3P', '4P'], module: '22E', widthsMm: [600], sourceWidthCell: '600 mm / 800 mm**', footnoteArrangement: { widthMm: 800, footnote: '**' } },
     { sourceBreaker: 'Emax2.2', frames: ['E2.2'], position: 'Vertical', poles: ['3P', '4P'], module: '22E', widthsMm: [600] },
     { sourceBreaker: 'Emax4.2', frames: ['E4.2'], position: 'Vertical', poles: ['3P'], module: '22E', widthsMm: [600] },
     { sourceBreaker: 'Emax4.2', frames: ['E4.2'], position: 'Vertical', poles: ['4P'], module: '22E', widthsMm: [800] },
@@ -85,8 +95,8 @@ export const ABB_POWER_CENTER_BREAKERS = {
     { sourceBreaker: 'Tmax XT3', frames: ['XT3'], position: 'Horizontal', poles: ['3P', '4P'], module: '8E', widthsMm: [600] },
     { sourceBreaker: 'Tmax XT4', frames: ['XT4'], position: 'Horizontal', poles: ['3P', '4P'], module: '8E', widthsMm: [600] },
     { sourceBreaker: 'Tmax T5', frames: ['T5 400A', 'T5 630A'], position: 'Horizontal', poles: ['3P', '4P'], module: '12E', widthsMm: [600] },
-    { sourceBreaker: 'Tmax T6', frames: ['T6 630A'], position: 'Vertical', poles: ['3P', '4P'], module: '22E', widthsMm: [600, 800], widthFootnotes: { 800: ['**'] } },
-    { sourceBreaker: 'Tmax T7', frames: ['T7'], position: 'Vertical', poles: ['3P', '4P'], module: '22E', widthsMm: [600, 800], widthFootnotes: { 800: ['**'] } },
+    { sourceBreaker: 'Tmax T6', frames: ['T6 630A'], position: 'Vertical', poles: ['3P', '4P'], module: '22E', widthsMm: [600], sourceWidthCell: '600 mm / 800 mm**', footnoteArrangement: { widthMm: 800, footnote: '**' } },
+    { sourceBreaker: 'Tmax T7', frames: ['T7'], position: 'Vertical', poles: ['3P', '4P'], module: '22E', widthsMm: [600], sourceWidthCell: '600 mm / 800 mm**', footnoteArrangement: { widthMm: 800, footnote: '**' } },
   ],
 };
 

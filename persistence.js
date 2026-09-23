@@ -50,6 +50,7 @@ function normalizeConfiguration(raw, legacyBusbarLayouts) {
     if (domains.mountingDesigns.includes(config.mountingDesign)) entry.mountingDesign = config.mountingDesign;
     if (domains.ventilation.includes(config.ventilation)) entry.ventilation = config.ventilation;
     if (domains.cubicleTypes.includes(config.cubicleType)) entry.cubicleType = config.cubicleType;
+    if (domains.performanceLevels.includes(config.performanceLevel)) entry.performanceLevel = config.performanceLevel;
     if (domains.breakingCapacityClasses.includes(config.breakingCapacityClass)) entry.breakingCapacityClass = config.breakingCapacityClass;
     breakers[internalId] = entry;
   });
@@ -84,7 +85,13 @@ function applyRecommendation(breaker, project) {
   breaker.frame = recommendation.frame;
   breaker.type = recommendation.type;
   breaker.recommendationClass = recommendation.classification;
-  breaker.recommendation = { status: recommendation.status, policy: recommendation.policy, candidates: recommendation.candidates.map(item => item.frame) };
+  // No source-backed candidate: series / frame / type stay null (never a placeholder breaker).
+  breaker.recommendation = {
+    status: recommendation.status,
+    policy: recommendation.policy,
+    candidates: recommendation.candidates.map(item => item.frame),
+    unresolvedConditions: recommendation.unresolvedConditions || (recommendation.status === 'NO_ESTABLISHED_CANDIDATE' ? ['No source-backed candidate for ' + breaker.rating] : []),
+  };
 }
 
 function legacyArrayToObject(row) {

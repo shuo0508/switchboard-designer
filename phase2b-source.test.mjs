@@ -14,7 +14,6 @@ import {
   selectSiemens3waTable,
   validateDesignConfiguration,
 } from './manufacturer-rules.js';
-import { SIEMENS_3VA_TABLE_3_17, SIEMENS_3WA_TABLES } from './manufacturer-data/siemens-s8.js';
 import { FUNCTION_OPTIONS } from './topology.js';
 import { normalizeBreaker, normalizeProject } from './persistence.js';
 
@@ -87,15 +86,15 @@ const status = (item, p) => evaluateBreaker(item, p).status;
   const sections = generateSections(t6, t6p, 'SWB-01');
   assert.equal(sections.length, 4, 'no automatic four-breaker packing');
   assert.ok(sections.every(section => section.packingRuleId === 'NO_AUTOMATIC_MCCB_PACKING' && section.widthStatus === 'PROVISIONAL'));
+  assert.ok(sections.every(section => section.width === 600), 'no shared 800 mm section is generated');
   const t6eval = evaluateBreaker(t6[0], t6p);
-  assert.equal(t6eval.status, 'MANUFACTURER_SUPPORTED_USER_SELECTED');
-  assert.ok(t6eval.sourceConditions.some(item => item.includes('not applied automatically')));
-  assert.ok(t6.every(item => evaluateBreaker(item, t6p).ruleId !== four.ruleId));
+  assert.equal(t6eval.status, 'MANUFACTURER_CONFIRMATION_REQUIRED', 'stored 800 mm is only the ** arrangement');
+  assert.equal(t6eval.ruleId, four.ruleId);
+  assert.ok(t6eval.sourceConditions.some(item => item.includes('Footnote **') && item.includes('not applied')));
 
-  // E1.2 600/800 are manufacturer-supported alternatives, never Verified by selection.
-  const e12 = project('ABB', {}, { b1: { cubicleWidthMm: 600 } });
-  assert.equal(evaluateBreaker(breaker({ frame: 'E1.2', rating: '1250A' }), e12).confidence, CONFIDENCE.MANUFACTURER_SUPPORTED_USER_SELECTED);
-  assert.equal(evaluateBreaker(breaker({ frame: 'E1.2', rating: '1250A' }), project('ABB')).ruleId, 'ABB_MNSR_PC_BREAKERS__WIDTH_SELECTION_REQUIRED');
+  // E1.2: 600 mm is the single-breaker width, no user selection involved.
+  const e12 = evaluateBreaker(breaker({ frame: 'E1.2', rating: '1250A' }), project('ABB'));
+  assert.deepEqual([e12.status, e12.widthMm, e12.availableWidths], ['MANUFACTURER_VERIFIED', 600, [600]]);
 }
 
 // ---------------------------------------------------------------- AUTO selection
@@ -120,12 +119,7 @@ const status = (item, p) => evaluateBreaker(item, p).status;
 
 // ---------------------------------------------------------------- Siemens 3WA tables
 {
-  const tablesWith = frame => Object.values(SIEMENS_3WA_TABLES).filter(table => table.rows[frame]).map(table => table.id);
-  assert.deepEqual(tablesWith('3WA1240'), ['TABLE_3_3_G1']);
-  assert.deepEqual(tablesWith('3WA1363'), ['TABLE_3_2_TOP', 'TABLE_3_3_G1']);
-  assert.deepEqual(tablesWith('3WA1350'), ['TABLE_3_2_TOP', 'TABLE_3_3_G1', 'TABLE_3_3_G2']);
-  assert.equal(Object.keys(SIEMENS_3WA_TABLES).length, 5);
-
+  // Table row content is verified against the independent fixture in source-fixtures.test.mjs.
   const wa = (frame, rating, pole, route = 'Bottom', extra = {}) => breaker({ series: 'SENTRON 3WA', frame, rating, pole, route, ...extra });
   const sp = (position, config, board = {}, extra = {}) => project('Siemens', { busbarPositions: { 'Input Bus': position }, ...board }, { b1: config }, extra);
 
@@ -146,14 +140,16 @@ const status = (item, p) => evaluateBreaker(item, p).status;
   assert.equal(r1350.status, 'MANUFACTURER_CONFIRMATION_REQUIRED', 'max. 100 kA is not collected, so footnote 4) is not fully matched');
   assert.deepEqual(r1350.missingParameters.length, 1);
   assert.ok(r1350.missingParameters[0].includes('100 kA'));
-  assert.equal(status(wa('3WA1350', '5000A', '4P'), g2p({ mountingDesign: 'Withdrawable Unit', breakingCapacityClass: 'S' }, { frameHeightMm: 2200, frontLayout: 'Double Front' })), 'INVALID_MANUFACTURER_CONFIGURATION');
-  assert.equal(status(wa('3WA1350', '5000A', '4P'), g2p({ mountingDesign: 'Withdrawable Unit', breakingCapacityClass: 'H' }, { frameHeightMm: 2200, frontLayout: 'Single Front' })), 'INVALID_MANUFACTURER_CONFIGURATION');
+  // Footnote 4) is SOURCE_AMBIGUOUS (p.104 wording): deviations need confirmation, they are not prohibitions.
+  assert.equal(status(wa('3WA1350', '5000A', '4P'), g2p({ mountingDesign: 'Withdrawable Unit', breakingCapacityClass: 'S' }, { frameHeightMm: 2200, frontLayout: 'Double Front' })), 'MANUFACTURER_CONFIRMATION_REQUIRED');
+  assert.equal(status(wa('3WA1350', '5000A', '4P'), g2p({ mountingDesign: 'Withdrawable Unit', breakingCapacityClass: 'H' }, { frameHeightMm: 2200, frontLayout: 'Single Front' })), 'MANUFACTURER_CONFIRMATION_REQUIRED');
   assert.equal(status(wa('3WA1350', '5000A', '4P'), g2p({ connectionType: 'Busbar' })), 'INVALID_MANUFACTURER_CONFIGURATION');
 
   // 3WA1363: not in 3/3 G2 or 3/4; in 3/2 needs withdrawable + 2200 mm only (no front-layout rule).
   assert.equal(evaluateBreaker(wa('3WA1363', '6300A', '4P'), sp('Rear Bottom', { connectionType: 'Busbar' })).ruleId, 'SIEMENS_S8_3WA_TABLE_3_3_G2__NOT_LISTED');
   const twoRear = project('Siemens', { busbarPositions: { 'Input Bus': 'Rear Top', 'UPS Output Bus': 'Rear Bottom' } }, { b1: { connectionType: 'Busbar' } });
-  const r3_4 = evaluateBreaker(wa('3WA1363', '6300A', '4P'), twoRear);
+  const upsBreaker = wa('3WA1232', '3200A', '4P', 'Bottom', { internalId: 'b2', id: 'CB-02', bus: 'UPS Output Bus', function: 'UPS_OUTPUT', direction: 'Incoming' });
+  const r3_4 = evaluateBreaker(wa('3WA1363', '6300A', '4P'), twoRear, [wa('3WA1363', '6300A', '4P'), upsBreaker]);
   assert.deepEqual([r3_4.status, r3_4.table], ['INVALID_MANUFACTURER_CONFIGURATION', 'Table 3/4 G1']);
   const top1363 = evaluateBreaker(wa('3WA1363', '6300A', '4P'), sp('Top', { connectionType: 'Busbar', mountingDesign: 'Withdrawable Unit' }, { frameHeightMm: 2200 }));
   assert.equal(top1363.status, 'MANUFACTURER_VERIFIED');
@@ -162,7 +158,7 @@ const status = (item, p) => evaluateBreaker(item, p).status;
   // G1/G2 derived from position and entry; never a user input.
   assert.equal(selectSiemens3waTable(sp('Rear Bottom', {}), wa('3WA1232', '3200A', '4P', 'Top')).table.id, 'TABLE_3_3_G1');
   assert.equal(selectSiemens3waTable(sp('Rear Bottom', {}), wa('3WA1232', '3200A', '4P', 'Bottom')).table.id, 'TABLE_3_3_G2');
-  assert.equal(selectSiemens3waTable(twoRear, wa('3WA1232', '3200A', '4P', 'Top')).table.id, 'TABLE_3_4_G2');
+  assert.equal(selectSiemens3waTable(twoRear, wa('3WA1232', '3200A', '4P', 'Top'), [wa('3WA1232', '3200A', '4P', 'Top'), upsBreaker]).table.id, 'TABLE_3_4_G2');
 
   // Width alternatives: manufacturer-supported, user selected, never Verified.
   const alt = sp('Top', { connectionType: 'Cable', cubicleWidthMm: 600 });
@@ -199,9 +195,8 @@ const status = (item, p) => evaluateBreaker(item, p).status;
   assert.equal(topTop.status, 'MANUFACTURER_CONFIRMATION_REQUIRED');
   assert.equal(status(va('3VA1580', '630A'), ok), 'MANUFACTURER_CONFIRMATION_REQUIRED', 'below rated device current: In not established');
 
-  // Tab. 3/17: 36 values, keyed by type / top-rear / entry / ventilation; Rear Top == Rear Bottom busbar.
-  const values = Object.values(SIEMENS_3VA_TABLE_3_17.rows).flatMap(row => [row.top.Bottom, row.rear.Bottom, row.rear.Top].flatMap(cell => [cell.nonVentilated, cell.ventilated]));
-  assert.equal(values.length, 36);
+  // Tab. 3/17 lookup keyed by type / top-rear / entry / ventilation; Rear Top == Rear Bottom busbar.
+  // (All 36 transcribed values are compared with the independent fixture in source-fixtures.test.mjs.)
   const lookup = (frame, position, route, ventilation) => evaluateBreaker(va(frame, frame === '3VA2510' || frame === '3VA1510' ? '1000A' : '630A', route), vp(position, { mountingDesign: 'Fixed-mounted', ventilation })).operationalCurrent;
   assert.equal(lookup('3VA1510', 'Top', 'Bottom', 'Non-ventilated'), 815);
   assert.equal(lookup('3VA2510', 'Rear Top', 'Top', 'Ventilated'), 895);

@@ -1,4 +1,4 @@
-import { ENGINEERING_SELECTION_POLICY, evaluateBreaker as sharedEvaluateBreaker, deriveBreakerType, getBreakerCandidates, framesForSeries, getAvailableManufacturerDimensions, getBusbarRule, getDesignConfigurationSchema, getProductCatalog, getRuleAudit } from './manufacturer-rules.js';
+import { ENGINEERING_SELECTION_POLICY, evaluateBreaker as sharedEvaluateBreaker, deriveBreakerType, getBreakerCandidates, framesForSeries, sanitizeBreakerConfiguration, getAvailableManufacturerDimensions, getBusbarRule, getDesignConfigurationSchema, getProductCatalog, getRuleAudit } from './manufacturer-rules.js';
 import { DESIGN_STATUS, buildDesignExport, designStatus, sectionsBySwitchboard } from './design-evaluation.js';
 import { buildGaViewModel } from './ga-view-model.js';
 import { renderProfessionalGa } from './ga-renderer.js';
@@ -35,7 +35,7 @@ function defaults(){
 }
 function save(){localStorage.setItem(STORAGE_KEYS.breakers,JSON.stringify(data));localStorage.setItem(STORAGE_KEYS.project,JSON.stringify(project))}
 
-function evaluate(b){return sharedEvaluateBreaker(b,project)}
+function evaluate(b){return sharedEvaluateBreaker(b,project,data)}
 function busbarRule(boardId,bus){return getBusbarRule(project,boardId,bus)}
 function catalog(){return getProductCatalog(project.manufacturer)}
 function options(b,col){
@@ -55,15 +55,16 @@ function clampSelection(){selectedIndex=Math.max(0,Math.min(selectedIndex,data.l
 
 function makeSelect(b,col){
   const select=document.createElement('select');select.dataset.col=col;
+  if((col==='series'||col==='frame')&&!b[col]){const none=document.createElement('option');none.value='';none.textContent='No source-backed candidate';select.append(none);select.classList.add('no-candidate')}
   options(b,col).forEach(value=>{const option=document.createElement('option');option.value=value;option.textContent=col==='function'?FUNCTIONS[value].label:col==='route'?cableRouteLabel(value):value;select.append(option)});
-  select.value=selectValue(b,col);select.title=select.selectedOptions[0]?.textContent||select.value;return select;
+  select.value=selectValue(b,col)??'';select.title=select.selectedOptions[0]?.textContent||select.value;return select;
 }
 function stateBadge(textValue,className=''){const badge=document.createElement('span');badge.className='state-badge '+className;badge.textContent=textValue;return badge}
 function control(b,i,col){
   if(col==='cb'){const wrap=document.createElement('span');wrap.className='cb-cell';const handle=document.createElement('span');handle.className='drag-handle';handle.textContent='⋮⋮';handle.title='Drag to reorder';handle.setAttribute('aria-label','Drag to reorder');const label=document.createElement('b');label.textContent=b.id;wrap.append(handle,label);return wrap}
   if(['function','rating','pole','switchboard'].includes(col))return makeSelect(b,col);
   if(col==='series'||col==='frame'){
-    const wrap=document.createElement('div');wrap.className='field-with-state';const select=makeSelect(b,col);const mode=col==='series'?b.seriesMode:b.frameMode;const alternatives=Math.max(0,(b.recommendation?.candidates?.length||0)-1);wrap.append(select,stateBadge(mode==='manual'?'MANUAL':'AUTO'+(alternatives?' +'+alternatives+' alt':''),mode));
+    const wrap=document.createElement('div');wrap.className='field-with-state';const select=makeSelect(b,col);const mode=col==='series'?b.seriesMode:b.frameMode;const alternatives=Math.max(0,(b.recommendation?.candidates?.length||0)-1);const noCandidate=mode!=='manual'&&!b.frame;wrap.append(select,stateBadge(mode==='manual'?'MANUAL':noCandidate?'AUTO · NO SOURCE-BACKED CANDIDATE':'AUTO'+(alternatives?' +'+alternatives+' alt':''),noCandidate?'no-candidate':mode));
     if(col==='series'&&(b.seriesMode==='manual'||b.frameMode==='manual')){const reset=document.createElement('button');reset.type='button';reset.className='inline-reset';reset.textContent='Revert to Auto';reset.title='Revert Series and Frame to shared-engine automatic recommendation';reset.addEventListener('click',event=>{event.stopPropagation();revertBreakerAuto(i)});wrap.append(reset)}
     return wrap;
   }
@@ -117,15 +118,16 @@ function renderDesignConfiguration(status){
   if(!schema.breakers.length)br.insertAdjacentHTML('beforeend','<p class="config-empty">No breaker-specific configuration is required for the current selection.</p>');grids.append(sw,br);host.append(grids);
   const box=document.createElement('div');box.className='config-status '+statusClass(statusName);
   const title=document.createElement('b');title.textContent=statusName;const summaryLine=document.createElement('span');
-  summaryLine.textContent=statusName===DESIGN_STATUS.VALID?'No conflicts and required manufacturer conditions resolved.':statusName===DESIGN_STATUS.INCOMPLETE?'No conflicts detected — manufacturer conditions or MCCB packing unresolved.':statusName===DESIGN_STATUS.ELECTRICAL_CONFLICT?'Electrical Design Conflict (design consistency, not a manufacturer table rule).':'Invalid Manufacturer Configuration.';
+  summaryLine.textContent=status.designStatusWording+(status.statusBasis.length?' Basis: '+status.statusBasis.join(' · ')+'.':'');
   box.append(title,summaryLine);
   if(status.invalidConditions.length)box.append(listBlock('Invalid Manufacturer Conditions',status.invalidConditions.map(item=>item.scope+' · '+item.message)));
   if(status.electricalConflicts.length)box.append(listBlock('Electrical Design Conflicts',status.electricalConflicts.map(item=>item.scope+' · '+item.message)));
   if(status.unresolvedConditions.length)box.append(listBlock('Unresolved Conditions',status.unresolvedConditions.map(item=>item.scope+' · '+item.category+' · '+item.condition)));
+  if(status.qualifiedConditions.length)box.append(listBlock('Qualified Results (not fully Manufacturer Verified)',status.qualifiedConditions.map(item=>item.scope+' · '+item.confidence+' · '+item.condition)));
   const dims=document.createElement('div');dims.className='dimension-status';const a=available.availableConfigurations;const dimension=getSwitchboardDimensions(project);
   dims.innerHTML='<div><b>Current Design Dimension</b><span>'+esc(dimension.label)+'</span></div><div><b>Manufacturer-Listed Dimensions</b><span>'+esc((a?.heightsMm?'H '+a.heightsMm.join('/')+' mm · ':'Not available in rule catalog · ')+(a?.widthsMm?'W '+a.widthsMm.join('/')+' mm · ':'')+(a?.depthsMm?'D '+a.depthsMm.join('/')+' mm':''))+'</span><small>Not matched to current configuration</small></div><div><b>Matched Manufacturer Dimension</b><span>None matched</span></div>';box.append(dims);host.append(box);
 }
-function revertBreakerAuto(index){const breaker=data[index];breaker.seriesMode='auto';breaker.frameMode='auto';applyRecommendation(breaker);const cfg=project.configuration.breakers[breaker.internalId];if(cfg){delete cfg.cubicleWidthMm;delete cfg.mountingDesign}render()}
+function revertBreakerAuto(index){const breaker=data[index];breaker.seriesMode='auto';breaker.frameMode='auto';applyRecommendation(breaker);render()}
 function revertRoute(index){data[index].routeMode='default';data[index].route=project.defaultRoute;render()}
 function edit(i,col,value){
   const b=data[i];
@@ -136,7 +138,7 @@ function edit(i,col,value){
   if(col==='rating'&&b.seriesMode!=='manual'&&b.frameMode!=='manual')applyRecommendation(b);
   if(col==='series'){b.seriesMode='manual';b.frame=framesForSeries(project.manufacturer,value)[0];b.frameMode='manual';b.type=deriveBreakerType(b.series)}
   if(col==='frame'){b.frameMode='manual';b.type=deriveBreakerType(b.series)}
-  if(['series','frame','pole','rating'].includes(col)){const cfg=project.configuration.breakers[b.internalId];if(cfg){delete cfg.cubicleWidthMm;if(col==='series'||col==='frame')delete cfg.mountingDesign}}
+  // Frame-specific configuration is revalidated against the rule engine in render().
   selectedGa=null;selectedIndex=i;
   render();
 }
@@ -150,6 +152,7 @@ function wireDrag(tr,b){
 }
 function selectRow(i){selectedGa=null;selectedIndex=i;document.querySelectorAll('#rows tr').forEach((row,index)=>row.classList.toggle('selected',index===i));renderGA(designStatus(project,data));updateInspector()}
 function render(){
+  sanitizeBreakerConfiguration(project,data);
   clampSelection();renumber();renderBoardRatings();const rows=$('#rows');rows.replaceChildren();
   data.forEach((b,i)=>{const tr=document.createElement('tr');tr.className=!selectedGa&&i===selectedIndex?'selected':'';tr.draggable=true;tr.dataset.internalId=b.internalId;wireDrag(tr,b);
     ['cb','switchboard','function','rating','series','frame','pole','route'].forEach(col=>{const td=document.createElement('td');const component=control(b,i,col);if(component){td.append(component);const select=component.matches?.('select')?component:component.querySelector?.('select');if(select)select.addEventListener('change',event=>edit(i,col,event.target.value))}tr.append(td)});
@@ -159,8 +162,8 @@ function render(){
 }
 function gaSections(){return sectionsBySwitchboard(project,data).map(board=>({boardId:board.boardId,sections:board.sections.map(section=>({...section,items:section.items.map(item=>data.indexOf(item))}))}))}
 function renderGA(status){
-  currentGaModel=buildGaViewModel({project,breakers:data,boardSections:gaSections(),busRules:busbarRule,evaluations:evaluate,dimensions:getSwitchboardDimensions(project)});currentGaModel.mode=gaMode;
-  const widths=currentGaModel.boards.map(board=>board.id+' '+board.combinedPlanningWidthMm+' mm'+(board.containsProvisionalWidth?' (incl. provisional)':''));
+  currentGaModel=buildGaViewModel({project,breakers:data,boardSections:gaSections(),busRules:busbarRule,evaluations:evaluate,dimensions:getSwitchboardDimensions(project),designStatus:status.designStatus});currentGaModel.mode=gaMode;
+  const widths=currentGaModel.boards.map(board=>board.id+' '+board.combinedPlanningWidthMm+' mm'+(board.containsProvisionalWidth?' (incl. provisional)':'')+(board.containsQualifiedWidth?' (incl. qualified)':''));
   $('#gaTotal').textContent=widths.join(' · ')+' · '+status.designStatus;
   const config=$('#busbarConfig');config.replaceChildren();
   currentGaModel.boards.forEach(board=>{if(!board.buses.length)return;const card=document.createElement('div');card.className='busbar-board-config';const title=document.createElement('b');title.textContent=board.id+' · Rated Main Bus '+board.ratedMainBus+' · Electrical / physical busbar configuration';card.append(title);board.buses.forEach(bus=>{const item=document.createElement('button');item.type='button';item.className='busbar-config-item';item.innerHTML='<strong>'+esc(bus.id+' · '+bus.role)+'</strong><span>Physical position: '+esc(bus.physicalPosition)+'</span><small>'+esc(bus.sourceRule+' · '+bus.confidence)+'</small>';item.addEventListener('click',()=>selectBus(bus,board));card.append(item)});config.append(card)});
@@ -174,12 +177,12 @@ function renderSummary(status){
   $('#widthLabel').textContent=project.quantity===2?'Per-Switchboard Planning Width':'Combined Planning Width';
   const total=$('#total');total.replaceChildren();
   status.boards.forEach(board=>{const sum=board.sections.reduce((acc,section)=>acc+section.width,0);const widthOf=status=>board.sections.filter(section=>section.widthStatus===status).reduce((acc,section)=>acc+section.width,0);const provisional=widthOf('PROVISIONAL'),userSelected=widthOf('USER_SELECTED'),partial=widthOf('PARTIALLY_VERIFIED');const line=document.createElement('span');line.textContent=(project.quantity===2?board.boardId+' ':'')+sum+' mm';total.append(line);const parts=[provisional?provisional+' mm Provisional Planning Width':'',userSelected?userSelected+' mm User-Selected Width':'',partial?partial+' mm Partially Verified Width':''].filter(Boolean);const note=document.createElement('i');note.textContent=parts.length?' incl. '+parts.join(' · '):' Verified Section Width';total.append(note)});
-  if(project.quantity===2){const combined=document.createElement('i');combined.textContent=' · Combined Planning Width '+w.combinedPlanningWidthMm+' mm'+(w.containsProvisionalWidth?' (contains provisional)':'');total.append(combined)}
+  if(project.quantity===2){const combined=document.createElement('i');combined.textContent=' · Combined Planning Width '+w.combinedPlanningWidthMm+' mm'+(w.containsProvisionalWidth?' (contains provisional)':'')+(!w.containsProvisionalWidth&&w.containsNonVerifiedWidth?' (contains qualified)':'');total.append(combined)}
   $('#sections').textContent=status.boards.reduce((acc,board)=>acc+board.sections.length,0);$('#breakerCount').textContent=data.length;$('#busLabel').textContent='Project Default '+project.mainBus;
   const counts=status.confidenceSummary;
   $('#designStatus').textContent=status.designStatus;
-  $('#confidenceCounts').textContent='Devices Verified '+counts.manufacturerMatched+' · User Selected '+counts.userSelected+' · Partially Verified '+counts.partiallyVerified+' · Confirmation Required '+counts.confirmationRequired+' · Provisional Sections '+counts.engineeringEstimate+' · Packing Unresolved '+counts.packingUnresolved+' · Invalid '+counts.invalid+' · Electrical Conflicts '+counts.electricalConflicts;
-  $('#criticalItems').textContent=status.unresolvedConditions.length?status.unresolvedConditions.length+' unresolved condition(s)':'No unresolved conditions';
+  $('#confidenceCounts').textContent='Devices Verified '+counts.manufacturerMatched+' · Qualified '+counts.qualified+' · User Selected '+counts.userSelected+' · Partially Verified '+counts.partiallyVerified+' · Confirmation Required '+counts.confirmationRequired+' · Provisional Sections '+counts.engineeringEstimate+' · Packing Unresolved '+counts.packingUnresolved+' · Invalid '+counts.invalid+' · Electrical Conflicts '+counts.electricalConflicts;
+  $('#criticalItems').textContent=(status.unresolvedConditions.length?status.unresolvedConditions.length+' unresolved condition(s)':'No unresolved conditions')+(status.qualifiedConditions.length?' · '+status.qualifiedConditions.length+' qualified result(s)':'');
   $('#physicalDimensions').textContent=getSwitchboardDimensions(project).label;
 }
 function traceLines(title,values){
@@ -191,10 +194,10 @@ function sourceTraceHtml(ruleId,source={}){
 }
 function sectionForBreaker(b){for(const board of sectionsBySwitchboard(project,data)){const section=board.sections.find(item=>item.items.includes(b));if(section)return section}return null}
 function applyTrace(title,b,e,bar,section){
-  $('#selectedTitle').textContent=title;const inputs=[b.series,b.frame,b.rating,b.pole,b.type,'Function: '+FUNCTIONS[b.function].label,'Cable Route: '+cableRouteLabel(b.route),'Rated Main Bus: '+ratedMainBus(project,b.switchboardId)];
+  $('#selectedTitle').textContent=title;const inputs=[b.series||'Series: No source-backed candidate',b.frame||'Frame: No source-backed candidate',b.rating,b.pole,b.type||'Type: not selected','Function: '+FUNCTIONS[b.function].label,'Cable Route: '+cableRouteLabel(b.route),'Rated Main Bus: '+ratedMainBus(project,b.switchboardId)];
   const deviceData={ruleId:e.ruleId,confidence:e.confidence,classification:e.classification,deviceWidth:e.widthMm+' mm'+(e.status==='MANUFACTURER_VERIFIED'?'':e.status==='MANUFACTURER_SUPPORTED_USER_SELECTED'?' (user selected from '+(e.availableWidths||[]).join(' / ')+' mm)':e.status==='PARTIALLY_VERIFIED'?' (nominal · partially verified)':' (provisional / not matched)')};if(e.module)deviceData.module=e.module+(e.moduleKind?' · '+e.moduleKind:'');if(e.widthReason)deviceData.widthReason=e.widthReason;if(e.arrangement)deviceData.arrangement=e.arrangement;
-  const operational={breakerRatedCurrent:b.rating};if(e.operationalCurrent!=null)operational.manufacturerOperationalCurrent=e.operationalCurrent+' A (Tab. 3/17)';if(e.operationalCurrentStatus)operational.operationalCurrentStatus=e.operationalCurrentStatus;const info=e.manufacturerOperationalCurrent;if(info){operational.manufacturerOperationalCurrentSource=info.table;['status','note','nonVentilated','ventilated','usage'].forEach(key=>{if(info[key])operational[key]=info[key]})}
-  const candidates=getBreakerCandidates(project.manufacturer,b.rating).map(item=>item.frame);const auto=b.seriesMode==='manual'||b.frameMode==='manual'?{mode:'MANUAL (user selection)',sourceBackedCandidates:candidates.join(', ')||'None'}:{mode:'AUTO',status:b.recommendation?.status||'-',sourceBackedCandidates:candidates.join(', ')||'None - Manufacturer Confirmation Required',selected:b.frame,policy:ENGINEERING_SELECTION_POLICY.id+' ('+ENGINEERING_SELECTION_POLICY.classification+', not a manufacturer recommendation)'};
+  const operational={breakerRatedCurrent:b.rating};if(e.operationalCurrent!=null)operational.manufacturerOperationalCurrent=e.operationalCurrent+' A (Tab. 3/17, informational — not compared with Breaker Rated Current)';if(e.operationalCurrentStatus)operational.operationalCurrentStatus=e.operationalCurrentStatus;const info=e.manufacturerOperationalCurrent;if(info){operational.manufacturerOperationalCurrentSource=info.table;['status','note','nonVentilated','ventilated','usage'].forEach(key=>{if(info[key])operational[key]=info[key]})}
+  const candidates=getBreakerCandidates(project.manufacturer,b.rating).map(item=>item.frame+(item.performanceLevelDependency?' (performance level '+item.performanceLevels.join(' / ')+' only)':''));const auto=b.seriesMode==='manual'||b.frameMode==='manual'?{mode:'MANUAL (user selection)',sourceBackedCandidates:candidates.join(', ')||'None'}:{mode:'AUTO',status:b.recommendation?.status||'-',sourceBackedCandidates:candidates.join(', ')||'None - NO_ESTABLISHED_CANDIDATE · Manufacturer Confirmation Required',selected:b.frame||'No source-backed candidate (no breaker selected)',policy:ENGINEERING_SELECTION_POLICY.id+' ('+ENGINEERING_SELECTION_POLICY.classification+', not a manufacturer recommendation)',unresolved:(b.recommendation?.unresolvedConditions||[]).join(' · ')||'None'};
   const tableData={table:e.table||'Not specified in source metadata'};if(e.cubicleType)tableData.cubicleType=e.cubicleType;if(e.tableId)tableData.tableId=e.tableId;
   const sectionData=section?{section:section.boardId+' / '+section.id,planningWidth:section.width+' mm · '+section.widthLabel,arrangementConfidence:section.confidence,packingStatus:section.packingStatus,packingRule:section.packingRuleId}:{section:'Not assigned to an active switchboard'};
   const dimension=getSwitchboardDimensions(project);
@@ -241,8 +244,8 @@ function performExport(exportData){const payload=JSON.stringify(exportData,null,
 function requestExport(){
   const exportData=buildDesignExport(project,data);
   if(exportData.designStatus===DESIGN_STATUS.VALID){performExport(exportData);return}
-  const body=textBlock('export-warning',[['b',exportData.designStatus],['span',exportData.unresolvedConditions.length+' unresolved condition(s).'],['span',exportData.invalidConditions.length+' invalid manufacturer condition(s).'],['span',exportData.electricalConflicts.length+' electrical design conflict(s).'],['span',exportData.containsProvisionalWidth?'Combined Planning Width contains provisional section widths.':'All section widths verified.'],['small','The exported JSON retains designStatus, unresolvedConditions, invalidConditions, electricalConflicts, confidenceSummary and width status.']]);
-  const draft=exportData.designStatus===DESIGN_STATUS.INCOMPLETE;
+  const body=textBlock('export-warning',[['b',exportData.designStatus],['span',exportData.designStatusWording],['span',exportData.unresolvedConditions.length+' unresolved condition(s).'],['span',exportData.qualifiedConditions.length+' qualified result(s).'],['span',exportData.invalidConditions.length+' invalid manufacturer condition(s).'],['span',exportData.electricalConflicts.length+' electrical design conflict(s).'],['span',exportData.containsProvisionalWidth?'Combined Planning Width contains provisional section widths.':exportData.widthSummary.containsNonVerifiedWidth?'Combined Planning Width contains qualified (not fully verified) section widths.':'All section widths verified.'],['small','The exported JSON retains designStatus, unresolvedConditions, invalidConditions, electricalConflicts, confidenceSummary and width status.']]);
+  const draft=exportData.designStatus===DESIGN_STATUS.INCOMPLETE||exportData.designStatus===DESIGN_STATUS.QUALIFIED;
   showConfirmation({eyebrow:'DESIGN STATUS: '+exportData.designStatus,title:draft?'Export as Draft?':'Export '+exportData.designStatus+' Draft?',body,applyLabel:draft?'Export as Draft':'Export '+exportData.designStatus+' Draft',onApply:()=>performExport(buildDesignExport(project,data))});
 }
 function setDimension(key,value){project.dimensions[key]=normalizeDimensionInput(value);render()}

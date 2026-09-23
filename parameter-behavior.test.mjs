@@ -90,7 +90,8 @@ for (const route of ['Top', 'Bottom']) {
 // Siemens route changes the Table 3/17 operational-current result while width remains Tab. 3/16 nominal 400 mm.
 const siemensRoute = projectFor('Siemens');
 siemensRoute.configuration.switchboards['SWB-01'] = { busbarPositions: { 'Input Bus': 'Rear Top' } };
-for (const [route, expectedCurrent, expectedConfidence] of [['Top', 630, 'Partially Verified'], ['Bottom', 625, 'Invalid Manufacturer Configuration']]) {
+// Tab. 3/17 operational current is manufacturer information; 625 A never invalidates a 630 A breaker.
+for (const [route, expectedCurrent, expectedConfidence] of [['Top', 630, 'Partially Verified'], ['Bottom', 625, 'Partially Verified']]) {
   const item = breaker({ internalId: 'va-' + route, series: 'SENTRON 3VA', frame: '3VA1563', rating: '630A', pole: '4P', type: 'MCCB', route });
   siemensRoute.configuration.breakers[item.internalId] = { ventilation: 'Non-ventilated', mountingDesign: 'Fixed-mounted' };
   const result = evaluateBreaker(item, siemensRoute);
@@ -136,11 +137,13 @@ for (const [pole, width] of [['3P', 600], ['4P', 800]]) {
   assert.equal(gaFor(abb, [item]).boards[0].combinedPlanningWidthMm, width);
   assert.equal(buildDesignExport(abb, [item]).combinedPlanningWidthMm, width);
 }
+// ABB E1.2: 600 mm single-breaker width; a stored 800 mm (** four-breaker arrangement) needs confirmation.
 const e12 = breaker({ internalId: 'e12', frame: 'E1.2', rating: '1250A' });
-for (const width of [600, 800]) {
-  abb.configuration.breakers.e12 = { cubicleWidthMm: width };
-  assert.equal(evaluateBreaker(e12, abb).widthMm, width);
-  assert.equal(buildDesignExport(abb, [e12]).sectionsBySwitchboard[0].combinedPlanningWidthMm, width);
+for (const [width, confidence] of [[undefined, 'Manufacturer Verified'], [600, 'Manufacturer Verified'], [800, 'Manufacturer Confirmation Required']]) {
+  abb.configuration.breakers.e12 = width ? { cubicleWidthMm: width } : {};
+  assert.equal(evaluateBreaker(e12, abb).widthMm, 600);
+  assert.equal(evaluateBreaker(e12, abb).confidence, confidence);
+  assert.equal(buildDesignExport(abb, [e12]).sectionsBySwitchboard[0].combinedPlanningWidthMm, 600);
 }
 
 // ABB and Siemens busbar positions remain electrical-role independent and propagate into GA/export.

@@ -1,16 +1,18 @@
 import { flowForBreaker, functionDefinition } from './topology.js';
 import { breakerDisplayLabel, ratedMainBus } from './project-model.js';
 
-function boardConfidence(buses, sections) {
-  const values = [...buses.map(bus => bus.confidence), ...sections.map(section => section.confidence)];
-  if (values.some(value => value === 'Invalid Manufacturer Configuration')) return 'Invalid Manufacturer Configuration';
-  if (values.some(value => value === 'Manufacturer Confirmation Required')) return 'Manufacturer Confirmation Required';
-  if (values.some(value => !['Manufacturer Verified', 'Manufacturer-Supported · User Selected'].includes(value))) return 'Mixed';
-  if (values.some(value => value === 'Manufacturer-Supported · User Selected')) return 'Manufacturer-Supported · User Selected';
-  return values.length ? 'Manufacturer Verified' : 'Schematic';
+// Lowest section confidence on the board; never higher than any section result.
+// (Busbar positions are user design inputs and are reported separately on each bus.)
+const CONFIDENCE_ORDER = ['Invalid Manufacturer Configuration', 'Manufacturer Confirmation Required', 'Not Established By Provided Source', 'Partially Verified', 'Manufacturer-Supported · User Selected', 'Manufacturer Verified'];
+function boardConfidence(sections) {
+  if (!sections.length) return 'Schematic';
+  const ranks = sections.map(section => CONFIDENCE_ORDER.indexOf(section.confidence));
+  if (ranks.some(rank => rank < 0)) return 'Mixed';
+  return CONFIDENCE_ORDER[Math.min(...ranks)];
 }
 
-export function buildGaViewModel({ project, breakers, boardSections, busRules, evaluations, dimensions }) {
+// designStatus comes from design-evaluation.designStatus() and is displayed as-is (never recomputed here).
+export function buildGaViewModel({ project, breakers, boardSections, busRules, evaluations, dimensions, designStatus = null }) {
   const breakerByIndex = index => breakers[index];
   const boards = boardSections.map(({ boardId, sections }) => {
     const busesInUse = [...new Set(sections.map(section => section.bus))];
@@ -41,7 +43,7 @@ export function buildGaViewModel({ project, breakers, boardSections, busRules, e
           functionKey: breaker.function,
           functionLabel: functionDefinition(breaker.function).label,
           rating: breaker.rating,
-          frame: breaker.frame,
+          frame: breaker.frame || 'No source-backed candidate',
           poles: breaker.pole,
           type: breaker.type,
           route: breaker.route,
@@ -70,6 +72,7 @@ export function buildGaViewModel({ project, breakers, boardSections, busRules, e
       };
     });
     const provisional = modelSections.filter(section => section.widthStatus === 'PROVISIONAL');
+    const qualifiedWidth = modelSections.filter(section => section.widthStatus === 'PARTIALLY_VERIFIED' || section.widthStatus === 'USER_SELECTED');
     return {
       id: boardId,
       manufacturer: project.manufacturer,
@@ -78,6 +81,8 @@ export function buildGaViewModel({ project, breakers, boardSections, busRules, e
       combinedPlanningWidthMm: modelSections.reduce((sum, section) => sum + section.widthMm, 0),
       provisionalPlanningWidthMm: provisional.reduce((sum, section) => sum + section.widthMm, 0),
       containsProvisionalWidth: provisional.length > 0,
+      qualifiedPlanningWidthMm: qualifiedWidth.reduce((sum, section) => sum + section.widthMm, 0),
+      containsQualifiedWidth: qualifiedWidth.length > 0,
       dimensions: {
         heightMm: dimensions.heightMm,
         depthMm: dimensions.depthMm,
@@ -87,14 +92,17 @@ export function buildGaViewModel({ project, breakers, boardSections, busRules, e
       },
       buses,
       sections: modelSections,
-      confidence: boardConfidence(buses, modelSections),
+      confidence: boardConfidence(modelSections),
+      designStatus,
     };
   });
   return {
     mode: 'SCHEMATIC',
+    designStatus,
     boards,
     combinedPlanningWidthMm: boards.reduce((sum, board) => sum + board.combinedPlanningWidthMm, 0),
     containsProvisionalWidth: boards.some(board => board.containsProvisionalWidth),
+    containsQualifiedWidth: boards.some(board => board.containsQualifiedWidth),
   };
 }
 

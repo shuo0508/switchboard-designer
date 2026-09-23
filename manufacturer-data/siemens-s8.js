@@ -76,7 +76,15 @@ export const SIEMENS_3WA_TABLES = {
     footnotes: {
       1: FOOTNOTE_WITHDRAWABLE_2200,
       3: { text: 'Frame height 2,200 mm', frameHeightMm: 2200 },
-      4: { text: 'Main busbar up to 7,010A rear-bottom, cable connection bottom, 3WA1350 H, C (max. 100kA), double front 1,200mm deep', mainBusbarMaxA: 7010, busbarPosition: 'Rear Bottom', cableEntry: 'Bottom', connectionType: 'Cable', breakingCapacityClasses: ['H', 'C'], maxShortCircuitKa: 100, frontLayout: 'Double Front', depthMm: 1200 },
+      4: {
+        text: 'Main busbar up to 7,010A rear-bottom, cable connection bottom, 3WA1350 H, C (max. 100kA), double front 1,200mm deep', mainBusbarMaxA: 7010, busbarPosition: 'Rear Bottom', cableEntry: 'Bottom', connectionType: 'Cable', breakingCapacityClasses: ['H', 'C'], maxShortCircuitKa: 100, frontLayout: 'Double Front', depthMm: 1200,
+        // The footnote lists conditions but does not state that other configurations are prohibited, and p.104
+        // (printed p.100) describes the 5,000 A feeder "with cable connection opposed to the main busbar rear-bottom"
+        // as double-front only with "a special cubicle at the rear". Not reconciled: deviations → confirmation, never invalid.
+        sourceStatus: 'SOURCE_AMBIGUOUS',
+        ambiguity: 'Tab. 3/3 fn 4) (rear-bottom, cable connection bottom, 3WA1350 H/C, max. 100 kA, double front 1,200 mm deep) vs p.104 "incoming/outgoing feeder 5,000 A with cable connection opposed to the main busbar rear-bottom is only implemented as a double front and absolutely requires a special cubicle at the rear".',
+        relatedSource: { pdfPage: '104', printedPage: '100', section: '9.1 Single-front and double-front switchboards' },
+      },
     },
     rows: {
       '3WA1106': row(630, [400, 600], [600], [], []),

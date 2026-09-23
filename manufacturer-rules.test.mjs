@@ -34,12 +34,14 @@ assert.equal(evaluateBreaker(breaker({ frame: 'E4.2', pole: '4P' }), abb).widthM
 assert.equal(evaluateBreaker(breaker({ frame: 'E6.2', pole: '3P', rating: '6300A' }), abb).widthMm, 1000);
 assert.equal(evaluateBreaker(breaker({ frame: 'E6.2', pole: '4P', rating: '6300A' }), abb).widthMm, 1200);
 
+// ABB p.22 "600 mm / 800 mm**": single E1.2 is 600 mm; 800 mm is the ** four-breaker arrangement only.
 const e12 = breaker({ internalId: 'e12', frame: 'E1.2', rating: '1250A' });
-assert.equal(evaluateBreaker(e12, abb).confidence, 'Manufacturer Confirmation Required');
-abb.configuration.breakers.e12 = { cubicleWidthMm: 800 };
+assert.equal(evaluateBreaker(e12, abb).confidence, 'Manufacturer Verified');
 assert.equal(evaluateBreaker(e12, abb).ruleId, 'ABB_MNSR_PC_BREAKERS__E1.2_4P');
-assert.equal(evaluateBreaker(e12, abb).confidence, 'Manufacturer-Supported · User Selected');
-assert.equal(evaluateBreaker(e12, abb).widthMm, 800);
+assert.equal(evaluateBreaker(e12, abb).widthMm, 600);
+abb.configuration.breakers.e12 = { cubicleWidthMm: 800 };
+assert.equal(evaluateBreaker(e12, abb).confidence, 'Manufacturer Confirmation Required');
+assert.equal(evaluateBreaker(e12, abb).ruleId, 'ABB_MNSR_T6_T7_FOUR_BREAKER_800_AVAILABLE');
 
 const abbFrames = [
   ['XT4', 'Tmax XT', '160A', '4P', '8E'],
@@ -115,7 +117,7 @@ const twoBusBreakers = [
 siemensTwoBus.configuration.breakers['wa-a'] = { connectionType: 'Cable' };
 siemensTwoBus.configuration.breakers['wa-b'] = { connectionType: 'Cable' };
 assert.equal(validateDesignConfiguration(siemensTwoBus, twoBusBreakers).valid, true);
-assert.equal(evaluateBreaker(twoBusBreakers[0], siemensTwoBus).table, 'Table 3/4 G1');
+assert.equal(evaluateBreaker(twoBusBreakers[0], siemensTwoBus, twoBusBreakers).table, 'Table 3/4 G1');
 
 const invalidPosition = structuredClone(siemensTwoBus);
 invalidPosition.configuration.switchboards['SWB-01'].busbarPositions['Input Bus'] = 'Center';
